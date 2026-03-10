@@ -35,7 +35,7 @@ Quick Start:
 
 Notes:
   - setup is the primary install path and prepares managed profiles.
-  - launch requires --browser and runs as the normal long-lived command.
+  - launch requires a browser selection and runs as the normal long-lived command.
   - launch always opens the requested URL in a fresh tab after the bridge connects.
   - if the browser is running a stale extension worker, launch warns and falls back for that run.
   - use --no-mcp when you only want the browser session.

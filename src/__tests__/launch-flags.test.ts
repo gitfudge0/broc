@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseJsonFlag, parseNoMcpFlag } from "../cli/flags.js";
+import { parseBrowserFlag, parseJsonFlag, parseNoMcpFlag } from "../cli/flags.js";
 
 describe("parseNoMcpFlag", () => {
   it("defaults to starting the MCP server", () => {
@@ -18,5 +18,34 @@ describe("parseJsonFlag", () => {
 
   it("enables JSON output when --json is present", () => {
     expect(parseJsonFlag(["status", "--json"])).toBe(true);
+  });
+});
+
+describe("parseBrowserFlag", () => {
+  it("prefers the last explicit argv browser over npm config env", () => {
+    expect(parseBrowserFlag(["launch", "--browser=chrome", "--browser=firefox"], { npm_config_browser: "chromium" })).toBe("firefox");
+  });
+
+  it("accepts npm config browser when argv omits it", () => {
+    expect(parseBrowserFlag(["launch"], { npm_config_browser: "firefox" })).toBe("firefox");
+  });
+
+  it("ignores npm config browser=true from npm's boolean config parsing", () => {
+    expect(parseBrowserFlag(["launch"], { npm_config_browser: "true" })).toBeUndefined();
+  });
+
+  it("exits with the existing validation error for invalid env values", () => {
+    const errors: string[] = [];
+    const exit = (() => {
+      throw new Error("exit");
+    }) as (code?: number) => never;
+
+    expect(() => parseBrowserFlag(["launch"], { npm_config_browser: "invalid" }, {
+      logError: (message) => errors.push(message),
+      exit,
+    })).toThrow("exit");
+    expect(errors).toEqual([
+      "Invalid browser: invalid. Must be one of: firefox, chrome, chromium",
+    ]);
   });
 });

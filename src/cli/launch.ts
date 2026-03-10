@@ -14,12 +14,23 @@ export interface LaunchPlan {
 
 export interface ProcessLike {
   pid?: number;
+  exitCode?: number | null;
+  signalCode?: NodeJS.Signals | null;
   kill(signal?: NodeJS.Signals): boolean;
   once(event: "spawn", listener: () => void): this;
   once(event: "error", listener: (error: Error) => void): this;
   once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
   on?(event: "error", listener: (error: Error) => void): this;
   unref?(): void;
+}
+
+export interface TerminateProcessOptions {
+  signal?: NodeJS.Signals;
+  timeoutMs?: number;
+  forceSignal?: NodeJS.Signals;
+  forceTimeoutMs?: number;
+  setTimer?: typeof setTimeout;
+  clearTimer?: typeof clearTimeout;
 }
 
 export async function buildFirefoxLaunchPlan(
@@ -155,22 +166,129 @@ export async function waitForBridgeOrBrowserExit(
   ]);
 }
 
+function hasExited(target: ProcessLike): boolean {
+  return target.exitCode !== undefined && target.exitCode !== null
+    || target.signalCode !== undefined && target.signalCode !== null;
+}
+
+function waitForProcessExit(target: ProcessLike): Promise<void> {
+  if (hasExited(target)) {
+    return Promise.resolve();
+  }
+
+  return new Promise<void>((resolve) => {
+    target.once("exit", () => resolve());
+  });
+}
+
+async function waitForExitWithTimeout(
+  target: ProcessLike,
+  exitPromise: Promise<void>,
+  timeoutMs: number,
+  setTimer: typeof setTimeout,
+  clearTimer: typeof clearTimeout,
+): Promise<boolean> {
+  if (hasExited(target)) {
+    return true;
+  }
+
+  const observedExit = exitPromise.then(() => true);
+
+  const timeoutPromise = new Promise<boolean>((resolve) => {
+    const timer = setTimer(() => {
+      clearTimer(timer);
+      resolve(false);
+    }, timeoutMs);
+
+    void observedExit.finally(() => {
+      clearTimer(timer);
+    });
+  });
+
+  return Promise.race([observedExit, timeoutPromise]);
+}
+
+export async function terminateProcess(
+  target: ProcessLike | null | undefined,
+  options: TerminateProcessOptions = {},
+): Promise<void> {
+  if (!target || hasExited(target)) {
+    return;
+  }
+
+  const signal = options.signal ?? "SIGTERM";
+  const timeoutMs = options.timeoutMs ?? 5000;
+  const forceSignal = options.forceSignal ?? "SIGKILL";
+  const forceTimeoutMs = options.forceTimeoutMs ?? 1000;
+  const setTimer = options.setTimer ?? setTimeout;
+  const clearTimer = options.clearTimer ?? clearTimeout;
+  const exitPromise = waitForProcessExit(target);
+
+  try {
+    target.kill(signal);
+  } catch {
+    return;
+  }
+
+  if (await waitForExitWithTimeout(target, exitPromise, timeoutMs, setTimer, clearTimer)) {
+    return;
+  }
+
+  try {
+    target.kill(forceSignal);
+  } catch {
+    return;
+  }
+
+  await waitForExitWithTimeout(target, exitPromise, forceTimeoutMs, setTimer, clearTimer);
+}
+
+export async function terminateProcesses(
+  targets: Array<ProcessLike | null | undefined>,
+  options: TerminateProcessOptions = {},
+): Promise<void> {
+  await Promise.all(targets.map((target) => terminateProcess(target, options)));
+}
+
+type TerminationSignalHandler = (signal: NodeJS.Signals) => void | Promise<void>;
+type RegisterSignalHandler = (signal: NodeJS.Signals, handler: () => void) => void;
+
 export function attachTerminationHandlers(
   targets: ProcessLike[],
-  registerHandler: (signal: NodeJS.Signals, handler: () => void) => void = (signal, handler) => {
-    process.on(signal, handler);
-  },
+  onSignalOrRegisterHandler?: TerminationSignalHandler | RegisterSignalHandler,
+  registerHandlerArg?: RegisterSignalHandler,
 ): () => void {
+  const onSignal = registerHandlerArg || (onSignalOrRegisterHandler && onSignalOrRegisterHandler.length >= 2)
+    ? ((signal: NodeJS.Signals) => {
+        for (const target of targets) {
+          try {
+            target.kill(signal);
+          } catch {
+            // Ignore already-exited children.
+          }
+        }
+      })
+    : ((onSignalOrRegisterHandler as TerminationSignalHandler | undefined) ?? ((signal: NodeJS.Signals) => {
+        for (const target of targets) {
+          try {
+            target.kill(signal);
+          } catch {
+            // Ignore already-exited children.
+          }
+        }
+      }));
+
+  const registerHandler = registerHandlerArg
+    ?? (onSignalOrRegisterHandler && onSignalOrRegisterHandler.length >= 2
+      ? onSignalOrRegisterHandler as RegisterSignalHandler
+      : (signal: NodeJS.Signals, handler: () => void) => {
+    process.on(signal, handler);
+      });
+
   const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
   const handlers = signals.map((signal) => {
     const handler = () => {
-      for (const target of targets) {
-        try {
-          target.kill(signal);
-        } catch {
-          // Ignore already-exited children.
-        }
-      }
+      void onSignal(signal);
     };
     registerHandler(signal, handler);
     return { signal, handler };

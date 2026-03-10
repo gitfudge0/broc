@@ -372,7 +372,7 @@ npm run clean
 npm run clean -- --all
 ```
 
-`npm run dev` defaults to Chrome. It starts `build.mjs --watch`, launches the browser with the built extension, starts MCP, and restarts the launch session when build outputs change.
+`npm run dev` defaults to Chrome. `concurrently` runs the build watcher and launch supervisor together, `wait-on` delays the first launch until the initial build artifacts exist, and `nodemon` restarts the launch session when the built extension or CLI artifacts change. Use `npm run dev -- --browser=<name>` to override the default browser for the launch session.
 
 ### Advanced Direct Commands
 

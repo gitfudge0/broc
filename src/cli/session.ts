@@ -1,4 +1,4 @@
-import { attachTerminationHandlers, waitForBridgeOrBrowserExit, type ProcessLike } from "./launch.js";
+import { attachTerminationHandlers, terminateProcesses, waitForBridgeOrBrowserExit, type ProcessLike } from "./launch.js";
 
 export interface LaunchSessionOptions {
   startMcp: boolean;
@@ -10,8 +10,8 @@ export interface LaunchSessionDeps {
   waitForChildSpawn: (child: ProcessLike, label: string) => Promise<void>;
   waitForBridge: () => Promise<void>;
   openLaunchUrl: () => Promise<void>;
-  stopProcess: (child: ProcessLike, signal?: NodeJS.Signals) => void;
-  attachSignalHandlers?: (targets: ProcessLike[]) => () => void;
+  attachSignalHandlers?: (targets: ProcessLike[], onSignal: (signal: NodeJS.Signals) => void | Promise<void>) => () => void;
+  terminateProcesses?: (targets: Array<ProcessLike | null | undefined>, options?: { signal?: NodeJS.Signals }) => Promise<void>;
 }
 
 export async function orchestrateLaunchSession(
@@ -31,26 +31,47 @@ export async function orchestrateLaunchSession(
   const mcpProcess = deps.spawnMcpServer();
   await deps.waitForChildSpawn(mcpProcess, "MCP server");
 
-  const cleanupSignalHandlers = (deps.attachSignalHandlers ?? attachTerminationHandlers)([
-    mcpProcess,
-    browserProcess,
-  ]);
+  const shutdownChildren = async (targets: Array<ProcessLike | null | undefined>, signal: NodeJS.Signals = "SIGTERM") => {
+    await (deps.terminateProcesses ?? terminateProcesses)(targets, { signal });
+  };
 
   await new Promise<void>((resolve, reject) => {
+    let shuttingDown = false;
+
+    const settle = (callback: () => void) => {
+      if (shuttingDown) {
+        return false;
+      }
+      shuttingDown = true;
+      callback();
+      return true;
+    };
+
+    const cleanupSignalHandlers = (deps.attachSignalHandlers ?? attachTerminationHandlers)([
+      mcpProcess,
+      browserProcess,
+    ], async (signal) => {
+      if (!settle(cleanupSignalHandlers)) return;
+      await shutdownChildren([mcpProcess, browserProcess], signal);
+      resolve();
+    });
+
     const onError = (error: Error) => {
-      cleanupSignalHandlers();
-      deps.stopProcess(browserProcess, "SIGTERM");
-      reject(error);
+      if (!settle(cleanupSignalHandlers)) return;
+      void shutdownChildren([browserProcess], "SIGTERM").finally(() => {
+        reject(error);
+      });
     };
 
     const onExit = (code: number | null) => {
-      cleanupSignalHandlers();
-      deps.stopProcess(browserProcess, "SIGTERM");
-      if (code === 0 || code === null) {
-        resolve();
-      } else {
-        reject(new Error(`MCP server exited with code ${code}`));
-      }
+      if (!settle(cleanupSignalHandlers)) return;
+      void shutdownChildren([browserProcess], "SIGTERM").finally(() => {
+        if (code === 0 || code === null) {
+          resolve();
+        } else {
+          reject(new Error(`MCP server exited with code ${code}`));
+        }
+      });
     };
 
     mcpProcess.once("error", onError);

@@ -40,8 +40,8 @@ import {
 } from "./cli/runtime.js";
 import { routeCliCommand } from "./cli/router.js";
 import { snapshotCommand } from "./cli/snapshot.js";
-import { VALID_BROWSERS, isBrowserType, type BrowserType } from "./cli/types.js";
-import { parseJsonFlag, parseNoMcpFlag } from "./cli/flags.js";
+import { VALID_BROWSERS, type BrowserType } from "./cli/types.js";
+import { parseBrowserFlag, parseJsonFlag, parseNoMcpFlag } from "./cli/flags.js";
 import { orchestrateLaunchSession } from "./cli/session.js";
 import { buildHelpText } from "./cli/help.js";
 import { collectBrowserStatusReport } from "./shared/bridge-status.js";
@@ -50,17 +50,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repoPaths = getRepoPaths(__dirname);
 const appPaths = getAppPaths();
-
-function parseBrowserFlag(argv: string[]): BrowserType | undefined {
-  for (const arg of argv) {
-    if (!arg.startsWith("--browser=")) continue;
-    const value = arg.split("=")[1].toLowerCase();
-    if (isBrowserType(value)) return value;
-    console.error(`Invalid browser: ${value}. Must be one of: ${VALID_BROWSERS.join(", ")}`);
-    process.exit(1);
-  }
-  return undefined;
-}
 
 function parseUrlFlag(argv: string[]): string | undefined {
   const urlArg = argv.find((arg) => arg.startsWith("--url="));
@@ -432,7 +421,6 @@ async function launchCommand(
         waitForChildSpawn,
         waitForBridge: () => waitForBridgeConnection(10000),
         openLaunchUrl: () => openLaunchTab(launchUrl),
-        stopProcess,
       },
     );
   } catch (error) {
@@ -613,7 +601,7 @@ async function showHelp(): Promise<void> {
 async function main(): Promise<void> {
   const command = process.argv[2] || "";
   const argv = process.argv.slice(3);
-  const browserFlag = parseBrowserFlag(process.argv.slice(2));
+  const browserFlag = parseBrowserFlag(process.argv.slice(2), process.env);
   const browsers = targetBrowsers(browserFlag);
   const url = parseUrlFlag(process.argv.slice(2));
   const startMcp = !parseNoMcpFlag(process.argv.slice(2));

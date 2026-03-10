@@ -8,7 +8,9 @@
     "browser-control": "dist/cli.mjs"
   },
   "scripts": {
-    "dev": "node scripts/dev.mjs",
+    "dev": "concurrently --names build,launch --prefix name --kill-others --kill-timeout 5000 -P \"npm:dev:build\" \"npm:dev:launch -- {@}\" --",
+    "dev:build": "node build.mjs --watch",
+    "dev:launch": "wait-on dist/cli.mjs dist/mcp-server.mjs dist/firefox/manifest.json dist/chrome/manifest.json && nodemon --watch dist/cli.mjs --watch dist/mcp-server.mjs --watch dist/firefox/background.js --watch dist/firefox/content.js --watch dist/firefox/manifest.json --watch dist/chrome/background.js --watch dist/chrome/content.js --watch dist/chrome/manifest.json --ext js,mjs,json --delay 300ms --signal SIGTERM --exec \"npm run launch -- --browser=chrome\"",
     "test": "vitest run",
     "build": "node build.mjs",
     "clean": "node scripts/clean.mjs",
@@ -16,9 +18,12 @@
     "launch": "node scripts/repo-cli.mjs launch"
   },
   "devDependencies": {
+    "concurrently": "^9.2.1",
     "esbuild": "^0.25.0",
+    "nodemon": "^3.1.14",
     "typescript": "^5.7.0",
     "vitest": "^4.0.18",
+    "wait-on": "^9.0.4",
     "web-ext": "^8.4.0"
   },
   "dependencies": {

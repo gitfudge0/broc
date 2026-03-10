@@ -1,11 +1,28 @@
 import { EventEmitter } from "events";
-import { describe, expect, it, vi } from "vitest";
-import { attachTerminationHandlers, waitForBridgeOrBrowserExit, waitForBridgeReady, type ProcessLike } from "../cli/launch.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  attachTerminationHandlers,
+  terminateProcess,
+  waitForBridgeOrBrowserExit,
+  waitForBridgeReady,
+  type ProcessLike,
+} from "../cli/launch.js";
 import { orchestrateLaunchSession } from "../cli/session.js";
 
 class FakeProcess extends EventEmitter implements ProcessLike {
   pid?: number;
-  kill = vi.fn(() => true);
+  exitCode?: number | null = null;
+  signalCode?: NodeJS.Signals | null = null;
+  kill = vi.fn((signal?: NodeJS.Signals) => {
+    if (signal === "SIGTERM" || signal === "SIGKILL") {
+      queueMicrotask(() => {
+        this.exitCode = signal === "SIGTERM" ? 0 : 137;
+        this.signalCode = signal ?? null;
+        this.emit("exit", this.exitCode, this.signalCode);
+      });
+    }
+    return true;
+  });
   unref = vi.fn();
 
   constructor(pid = 1234) {
@@ -13,6 +30,14 @@ class FakeProcess extends EventEmitter implements ProcessLike {
     this.pid = pid;
   }
 }
+
+class HungProcess extends FakeProcess {
+  override kill = vi.fn(() => true);
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("waitForBridgeReady", () => {
   it("resolves when the bridge becomes healthy", async () => {
@@ -72,6 +97,25 @@ describe("attachTerminationHandlers", () => {
   });
 });
 
+describe("terminateProcess", () => {
+  it("force-kills a child when graceful shutdown times out", async () => {
+    vi.useFakeTimers();
+    const child = new HungProcess();
+
+    const termination = terminateProcess(child, {
+      timeoutMs: 5000,
+      forceTimeoutMs: 1000,
+    });
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(child.kill).toHaveBeenNthCalledWith(1, "SIGTERM");
+    expect(child.kill).toHaveBeenNthCalledWith(2, "SIGKILL");
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await termination;
+  });
+});
+
 describe("orchestrateLaunchSession", () => {
   it("starts the browser before starting MCP", async () => {
     const calls: string[] = [];
@@ -99,7 +143,6 @@ describe("orchestrateLaunchSession", () => {
         openLaunchUrl: async () => {
           calls.push("open");
         },
-        stopProcess: vi.fn(),
         attachSignalHandlers: () => () => {},
       },
     );
@@ -121,7 +164,6 @@ describe("orchestrateLaunchSession", () => {
         waitForChildSpawn: async () => {},
         waitForBridge: async () => {},
         openLaunchUrl,
-        stopProcess: vi.fn(),
         attachSignalHandlers: () => () => {},
       },
     );
@@ -129,5 +171,48 @@ describe("orchestrateLaunchSession", () => {
     expect(spawnMcpServer).not.toHaveBeenCalled();
     expect(openLaunchUrl).toHaveBeenCalledOnce();
     expect(browser.unref).toHaveBeenCalledOnce();
+  });
+
+  it("settles after forwarding SIGTERM to browser and MCP children", async () => {
+    const browser = new FakeProcess();
+    const mcp = new FakeProcess();
+    let onSignal: ((signal: NodeJS.Signals) => void | Promise<void>) | null = null;
+    const terminateChildren = vi.fn(async (targets: Array<ProcessLike | null | undefined>, options?: { signal?: NodeJS.Signals }) => {
+      for (const target of targets) {
+        if (target) {
+          target.kill(options?.signal);
+        }
+      }
+    });
+
+    const promise = orchestrateLaunchSession(
+      { startMcp: true },
+      {
+        spawnBrowser: () => browser,
+        spawnMcpServer: () => mcp,
+        waitForChildSpawn: async () => {},
+        waitForBridge: async () => {},
+        openLaunchUrl: async () => {},
+        terminateProcesses: terminateChildren,
+        attachSignalHandlers: (_targets, handler) => {
+          onSignal = handler;
+          return () => {};
+        },
+      },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    if (!onSignal) {
+      throw new Error("Expected launch session to register signal handlers.");
+    }
+
+    await onSignal("SIGTERM");
+    await promise;
+
+    expect(terminateChildren).toHaveBeenCalledWith([mcp, browser], { signal: "SIGTERM" });
+    expect(mcp.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(browser.kill).toHaveBeenCalledWith("SIGTERM");
   });
 });
