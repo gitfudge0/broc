@@ -9,8 +9,8 @@ import {
 describe("collectBridgeStatus", () => {
   it("reports connected when the socket is reachable and ping succeeds", async () => {
     const report = await collectBridgeStatus({
-      socketPath: "/tmp/browser-control.sock",
-      pidPath: "/tmp/browser-control.pid",
+      socketPath: "/tmp/broc.sock",
+      pidPath: "/tmp/broc.pid",
       socketExists: () => true,
       readPidFile: () => "123",
       isPidAlive: () => true,
@@ -24,8 +24,8 @@ describe("collectBridgeStatus", () => {
 
   it("reports pid_missing when no bridge process or socket exists", async () => {
     const report = await collectBridgeStatus({
-      socketPath: "/tmp/browser-control.sock",
-      pidPath: "/tmp/browser-control.pid",
+      socketPath: "/tmp/broc.sock",
+      pidPath: "/tmp/broc.pid",
       socketExists: () => false,
       readPidFile: () => {
         throw new Error("missing");
@@ -33,13 +33,13 @@ describe("collectBridgeStatus", () => {
     });
 
     expect(report.phase).toBe("pid_missing");
-    expect(report.remediation[0]).toContain("browser-control launch");
+    expect(report.remediation[0]).toContain("broc launch");
   });
 
   it("reports pid_stale when a dead PID file remains", async () => {
     const report = await collectBridgeStatus({
-      socketPath: "/tmp/browser-control.sock",
-      pidPath: "/tmp/browser-control.pid",
+      socketPath: "/tmp/broc.sock",
+      pidPath: "/tmp/broc.pid",
       socketExists: () => false,
       readPidFile: () => "456",
       isPidAlive: () => false,
@@ -50,8 +50,8 @@ describe("collectBridgeStatus", () => {
 
   it("reports socket_unreachable when the socket exists but connect checks fail", async () => {
     const report = await collectBridgeStatus({
-      socketPath: "/tmp/browser-control.sock",
-      pidPath: "/tmp/browser-control.pid",
+      socketPath: "/tmp/broc.sock",
+      pidPath: "/tmp/broc.pid",
       socketExists: () => true,
       readPidFile: () => "123",
       isPidAlive: () => true,
@@ -66,8 +66,8 @@ describe("collectBridgeStatus", () => {
 
   it("reports ping_failed when the bridge accepts a connection but is unhealthy", async () => {
     const report = await collectBridgeStatus({
-      socketPath: "/tmp/browser-control.sock",
-      pidPath: "/tmp/browser-control.pid",
+      socketPath: "/tmp/broc.sock",
+      pidPath: "/tmp/broc.pid",
       socketExists: () => true,
       readPidFile: () => "123",
       isPidAlive: () => true,
@@ -83,8 +83,8 @@ describe("bridge status formatting", () => {
   it("formats remediation for disconnected bridge state", () => {
     const report = applyBridgePresentation({
       phase: "disconnected",
-      socketPath: "/tmp/browser-control.sock",
-      pidPath: "/tmp/browser-control.pid",
+      socketPath: "/tmp/broc.sock",
+      pidPath: "/tmp/broc.pid",
       pid: 321,
       pidAlive: false,
       socketExists: false,
@@ -102,8 +102,8 @@ describe("bridge status formatting", () => {
       setupStatePresent: true,
       bridge: applyBridgePresentation({
         phase: "ping_failed",
-        socketPath: "/tmp/browser-control.sock",
-        pidPath: "/tmp/browser-control.pid",
+        socketPath: "/tmp/broc.sock",
+        pidPath: "/tmp/broc.pid",
         pid: 123,
         pidAlive: true,
         socketExists: true,

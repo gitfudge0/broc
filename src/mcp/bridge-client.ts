@@ -4,7 +4,7 @@
 // The bridge host process is launched by the browser extension via native
 // messaging. This client connects to it via a Unix socket.
 //
-// Socket path: /tmp/browser-control-<uid>.sock
+// Socket path: /tmp/broc-<uid>.sock
 // ============================================================
 
 import { createConnection, type Socket } from "net";
@@ -25,11 +25,11 @@ function getUid(): number {
 }
 
 export function getSocketPath(): string {
-  return `/tmp/browser-control-${getUid()}.sock`;
+  return `/tmp/broc-${getUid()}.sock`;
 }
 
 export function getPidPath(): string {
-  return `/tmp/browser-control-${getUid()}.pid`;
+  return `/tmp/broc-${getUid()}.pid`;
 }
 
 /**
@@ -52,7 +52,7 @@ export function isBridgeRunning(): boolean {
 }
 
 export interface BridgeOptions {
-  /** Path to the Unix socket (default: /tmp/browser-control-<uid>.sock) */
+  /** Path to the Unix socket (default: /tmp/broc-<uid>.sock) */
   socketPath?: string;
   /** Timeout for requests in ms (default: 30000) */
   timeout?: number;

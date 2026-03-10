@@ -14,8 +14,8 @@
 // stdin/stdout is EXCLUSIVELY the native messaging channel.
 // MCP server and CLI connect via a Unix socket.
 //
-// Socket path: /tmp/browser-control-<uid>.sock
-// PID file:    /tmp/browser-control-<uid>.pid
+// Socket path: /tmp/broc-<uid>.sock
+// PID file:    /tmp/broc-<uid>.pid
 // ============================================================
 
 import { createServer, createConnection, type Server, type Socket } from "net";
@@ -36,11 +36,11 @@ function getUid(): number {
 }
 
 export function getSocketPath(): string {
-  return `/tmp/browser-control-${getUid()}.sock`;
+  return `/tmp/broc-${getUid()}.sock`;
 }
 
 export function getPidPath(): string {
-  return `/tmp/browser-control-${getUid()}.pid`;
+  return `/tmp/broc-${getUid()}.pid`;
 }
 
 // ---- Native messaging protocol ----

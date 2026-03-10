@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "Browser Control",
+  "name": "Broc",
   "version": "0.1.0",
   "description": "AI agent browser control via native messaging",
   "browser_specific_settings": {
     "gecko": {
-      "id": "browser-control@anthropic.ai",
+      "id": "broc@anthropic.ai",
       "strict_min_version": "128.0"
     }
   },

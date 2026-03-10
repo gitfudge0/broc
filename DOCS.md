@@ -1,4 +1,4 @@
-# Browser Control — Documentation
+# Broc — Documentation
 
 AI agent browser control via native messaging. Supports Firefox, Chrome, and Chromium.
 
@@ -28,8 +28,8 @@ No human-facing UI — this extension exists purely as a programmatic interface 
 
 ```bash
 # 1. Clone and install
-git clone <repo-url> browser-control
-cd browser-control
+git clone <repo-url> broc
+cd broc
 npm install
 
 # 2. One-command setup (builds, installs native host, prepares profiles)
@@ -66,19 +66,19 @@ The legacy CLI `install` command generates a platform-specific native host manif
 **Firefox manifest** uses `allowed_extensions`:
 ```json
 {
-  "name": "browser_control",
-  "description": "Browser Control native messaging host for AI agent interaction",
+  "name": "broc",
+  "description": "Broc native messaging host for AI agent interaction",
   "path": "/absolute/path/to/dist/bridge.mjs",
   "type": "stdio",
-  "allowed_extensions": ["browser-control@anthropic.ai"]
+  "allowed_extensions": ["broc@anthropic.ai"]
 }
 ```
 
 **Chrome/Chromium manifest** uses `allowed_origins`:
 ```json
 {
-  "name": "browser_control",
-  "description": "Browser Control native messaging host for AI agent interaction",
+  "name": "broc",
+  "description": "Broc native messaging host for AI agent interaction",
   "path": "/absolute/path/to/dist/bridge.mjs",
   "type": "stdio",
   "allowed_origins": ["chrome-extension://jmdfepifjgmfnngjdkceknidfmaeoeie/"]
@@ -93,7 +93,7 @@ The legacy CLI `install` command generates a platform-specific native host manif
 | Chrome | `~/.config/google-chrome/NativeMessagingHosts/` | `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/` | `%APPDATA%\Google\Chrome\NativeMessagingHosts\` |
 | Chromium | `~/.config/chromium/NativeMessagingHosts/` | `~/Library/Application Support/Chromium/NativeMessagingHosts/` | `%APPDATA%\Chromium\NativeMessagingHosts\` |
 
-On Windows you may also need a registry key (e.g., `HKCU\SOFTWARE\Google\Chrome\NativeMessagingHosts\browser_control`).
+On Windows you may also need a registry key (e.g., `HKCU\SOFTWARE\Google\Chrome\NativeMessagingHosts\broc`).
 
 ### Extension Permissions
 
@@ -112,9 +112,9 @@ On Windows you may also need a registry key (e.g., `HKCU\SOFTWARE\Google\Chrome\
 ```json
 {
   "mcpServers": {
-    "browser-control": {
+    "broc": {
       "command": "node",
-      "args": ["/absolute/path/to/browser-control/dist/cli.mjs"]
+      "args": ["/absolute/path/to/broc/dist/cli.mjs"]
     }
   }
 }
@@ -140,7 +140,7 @@ On Windows you may also need a registry key (e.g., `HKCU\SOFTWARE\Google\Chrome\
 
 ### Health and Troubleshooting
 
-- `browser-control status --json` prints the canonical machine-readable health report for CLI callers.
+- `broc status --json` prints the canonical machine-readable health report for CLI callers.
 - `browser_status` is the MCP-side health tool and returns the same bridge phase data plus a human-readable summary.
 - The MCP server now starts in degraded mode when the bridge is absent. In that state, `browser_status` still works and bridge-backed tools return targeted remediation instead of crashing the process at startup.
 - Chromium stderr lines such as Wayland image-description warnings or `google_apis ... DEPRECATED_ENDPOINT` are not treated as bridge health failures.
@@ -153,7 +153,7 @@ On Windows you may also need a registry key (e.g., `HKCU\SOFTWARE\Google\Chrome\
 ```
 AI Agent  ←─ MCP/stdio ─→  MCP Server  ─┐
                                          │ Unix socket
-                           CLI           ─┤ /tmp/browser-control-<uid>.sock
+                           CLI           ─┤ /tmp/broc-<uid>.sock
                                          │
                                       Bridge  ←─ native messaging (stdin/stdout) ─→  Extension
                                                                                           │
@@ -166,12 +166,12 @@ AI Agent  ←─ MCP/stdio ─→  MCP Server  ─┐
 
 **MCP Server** (`src/mcp/server.ts`) — Entry point for AI agents. Exposes 14 MCP tools, implements the safety pipeline, formats snapshots as text, supports degraded startup when the bridge is unavailable, and manages bridge client lifecycle.
 
-**Bridge Client** (`src/mcp/bridge-client.ts`) — Lives in the MCP server or CLI process. Connects to the bridge via a Unix socket (`/tmp/browser-control-<uid>.sock`). Handles request/response correlation, timeouts (30s default), and push event routing. Does not spawn the bridge — the browser extension does that.
+**Bridge Client** (`src/mcp/bridge-client.ts`) — Lives in the MCP server or CLI process. Connects to the bridge via a Unix socket (`/tmp/broc-<uid>.sock`). Handles request/response correlation, timeouts (30s default), and push event routing. Does not spawn the bridge — the browser extension does that.
 
 **Bridge Host** (`src/bridge/host.ts`) — Standalone Node.js process launched by the browser via native messaging.
 - **stdin/stdout**: Exclusively the native messaging protocol with the browser extension (length-prefixed JSON as required by the WebExtensions API).
-- **Unix socket** (`/tmp/browser-control-<uid>.sock`): MCP server and CLI connect here to send requests and receive responses/events.
-- **PID file** (`/tmp/browser-control-<uid>.pid`): Written on startup; clients use it to check if the bridge is running.
+- **Unix socket** (`/tmp/broc-<uid>.sock`): MCP server and CLI connect here to send requests and receive responses/events.
+- **PID file** (`/tmp/broc-<uid>.pid`): Written on startup; clients use it to check if the bridge is running.
 - Handles `ping`/`pong` locally (responds to socket clients without forwarding to the extension).
 - Cleans up socket and PID file on exit.
 
@@ -272,7 +272,7 @@ There are two distinct transport channels:
 [4 bytes: uint32 LE length][N bytes: UTF-8 JSON payload]
 ```
 
-**Unix socket (MCP server/CLI ↔ bridge):** The same length-prefixed framing over a Unix domain socket at `/tmp/browser-control-<uid>.sock`.
+**Unix socket (MCP server/CLI ↔ bridge):** The same length-prefixed framing over a Unix domain socket at `/tmp/broc-<uid>.sock`.
 
 Max message size: 1 MB.
 
@@ -388,7 +388,7 @@ These remain available, but they are no longer top-level npm scripts:
 
 **Extension:** `browser.storage.local.set({ debug: true })` in browser console.
 
-**Node (bridge/MCP):** `BROWSER_CONTROL_DEBUG=1 node dist/cli.mjs`
+**Node (bridge/MCP):** `BROC_DEBUG=1 node dist/cli.mjs`
 
 ### Using a Different Firefox Binary
 

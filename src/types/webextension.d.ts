@@ -1,6 +1,6 @@
 // ============================================================
 // Type declarations for WebExtension APIs (Firefox + Chrome)
-// Minimal subset needed by browser-control
+// Minimal subset needed by Broc
 //
 // Code uses `browser.*` everywhere. In Chrome, the polyfill shim
 // assigns `globalThis.browser = chrome`, so these types apply to

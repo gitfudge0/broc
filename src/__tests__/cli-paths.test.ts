@@ -4,15 +4,15 @@ import { getAppPathsFor } from "../cli/paths.js";
 describe("getAppPathsFor", () => {
   it("returns Linux config and cache paths", () => {
     const paths = getAppPathsFor("linux", {}, "/home/tester");
-    expect(paths.configDir).toBe("/home/tester/.config/browser-control");
-    expect(paths.cacheDir).toBe("/home/tester/.cache/browser-control");
-    expect(paths.stateFile).toBe("/home/tester/.config/browser-control/setup-state.json");
+    expect(paths.configDir).toBe("/home/tester/.config/broc");
+    expect(paths.cacheDir).toBe("/home/tester/.cache/broc");
+    expect(paths.stateFile).toBe("/home/tester/.config/broc/setup-state.json");
   });
 
   it("returns macOS config and cache paths", () => {
     const paths = getAppPathsFor("darwin", {}, "/Users/tester");
-    expect(paths.configDir).toBe("/Users/tester/Library/Application Support/browser-control");
-    expect(paths.cacheDir).toBe("/Users/tester/Library/Caches/browser-control");
+    expect(paths.configDir).toBe("/Users/tester/Library/Application Support/broc");
+    expect(paths.cacheDir).toBe("/Users/tester/Library/Caches/broc");
   });
 
   it("returns Windows config and cache paths", () => {

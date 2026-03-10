@@ -1,11 +1,11 @@
 export function buildHelpText(): string {
   return `
-browser-control - AI agent browser control via native messaging
+Broc - AI agent browser control via native messaging
 
 Supports Firefox, Chrome, and Chromium.
 
 Usage:
-  browser-control [command] [options]
+  broc [command] [options]
 
 Commands:
   (none)       Start the MCP server (default, for use with AI agents)
@@ -39,7 +39,7 @@ Notes:
   - launch always opens the requested URL in a fresh tab after the bridge connects.
   - if the browser is running a stale extension worker, launch warns and falls back for that run.
   - use --no-mcp when you only want the browser session.
-  - browser-control with no subcommand is still MCP-only/manual mode.
+  - broc with no subcommand is still MCP-only/manual mode.
   - use status --json or the browser_status MCP tool for canonical health checks.
   - install/uninstall remain available for low-level native-host management.
 `.trim();

@@ -34,7 +34,7 @@ describe("setup state", () => {
   });
 
   it("saves and reloads valid state", async () => {
-    tempDir = await mkdtemp(resolve(tmpdir(), "browser-control-state-"));
+    tempDir = await mkdtemp(resolve(tmpdir(), "broc-state-"));
     const stateFile = resolve(tempDir, "setup-state.json");
     const state = createEmptySetupState({
       repoRoot: "/repo",
