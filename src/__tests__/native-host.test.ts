@@ -19,8 +19,8 @@ describe("native manifest planning", () => {
   });
 
   it("places managed-browser native manifests inside the profile root", () => {
-    expect(getProfileNativeManifestPath("/tmp/browser-control/chrome")).toBe(
-      "/tmp/browser-control/chrome/Default/NativeMessagingHosts/browser_control.json",
+    expect(getProfileNativeManifestPath("/tmp/broc/chrome")).toBe(
+      "/tmp/broc/chrome/Default/NativeMessagingHosts/broc.json",
     );
   });
 });

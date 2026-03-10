@@ -20,7 +20,7 @@ describe("launch plan builders", () => {
   });
 
   it("builds the Firefox web-ext launch command", async () => {
-    tempDir = await mkdtemp(resolve(tmpdir(), "browser-control-launch-"));
+    tempDir = await mkdtemp(resolve(tmpdir(), "broc-launch-"));
     const webExtBinaryPath = resolve(tempDir, "web-ext");
     await writeFile(webExtBinaryPath, "#!/bin/sh\n");
 
@@ -52,7 +52,7 @@ describe("launch plan builders", () => {
   });
 
   it("defaults Firefox launch to google.com when no URL is provided", async () => {
-    tempDir = await mkdtemp(resolve(tmpdir(), "browser-control-launch-"));
+    tempDir = await mkdtemp(resolve(tmpdir(), "broc-launch-"));
     const webExtBinaryPath = resolve(tempDir, "web-ext");
     await writeFile(webExtBinaryPath, "#!/bin/sh\n");
 

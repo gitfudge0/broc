@@ -380,4 +380,4 @@ browser.runtime.onMessage.addListener(
   }
 );
 
-console.log("[browser-control] Content script loaded");
+console.log("[broc] Content script loaded");

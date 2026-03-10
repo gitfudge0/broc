@@ -15,7 +15,7 @@ describe("BridgeClient", () => {
   });
 
   it("throws SOCKET_MISSING when the socket does not exist", async () => {
-    tempDir = await mkdtemp(resolve(tmpdir(), "browser-control-bridge-"));
+    tempDir = await mkdtemp(resolve(tmpdir(), "broc-bridge-"));
     const client = new BridgeClient({
       socketPath: resolve(tempDir, "missing.sock"),
       connectTimeout: 0,
@@ -27,7 +27,7 @@ describe("BridgeClient", () => {
   });
 
   it("throws CONNECT_FAILED when the socket path exists but cannot accept connections", async () => {
-    tempDir = await mkdtemp(resolve(tmpdir(), "browser-control-bridge-"));
+    tempDir = await mkdtemp(resolve(tmpdir(), "broc-bridge-"));
     const fakeSocketPath = resolve(tempDir, "fake.sock");
     await writeFile(fakeSocketPath, "");
 

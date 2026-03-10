@@ -29,29 +29,29 @@ export function getAppPathsFor(
   switch (osName) {
     case "linux":
       return {
-        configDir: resolve(homeDir, ".config", "browser-control"),
-        cacheDir: resolve(homeDir, ".cache", "browser-control"),
-        profilesDir: resolve(homeDir, ".config", "browser-control", "profiles"),
-        runtimesDir: resolve(homeDir, ".cache", "browser-control", "runtimes"),
-        stateFile: resolve(homeDir, ".config", "browser-control", "setup-state.json"),
+        configDir: resolve(homeDir, ".config", "broc"),
+        cacheDir: resolve(homeDir, ".cache", "broc"),
+        profilesDir: resolve(homeDir, ".config", "broc", "profiles"),
+        runtimesDir: resolve(homeDir, ".cache", "broc", "runtimes"),
+        stateFile: resolve(homeDir, ".config", "broc", "setup-state.json"),
       };
     case "darwin":
       return {
-        configDir: resolve(homeDir, "Library", "Application Support", "browser-control"),
-        cacheDir: resolve(homeDir, "Library", "Caches", "browser-control"),
-        profilesDir: resolve(homeDir, "Library", "Application Support", "browser-control", "profiles"),
-        runtimesDir: resolve(homeDir, "Library", "Caches", "browser-control", "runtimes"),
-        stateFile: resolve(homeDir, "Library", "Application Support", "browser-control", "setup-state.json"),
+        configDir: resolve(homeDir, "Library", "Application Support", "broc"),
+        cacheDir: resolve(homeDir, "Library", "Caches", "broc"),
+        profilesDir: resolve(homeDir, "Library", "Application Support", "broc", "profiles"),
+        runtimesDir: resolve(homeDir, "Library", "Caches", "broc", "runtimes"),
+        stateFile: resolve(homeDir, "Library", "Application Support", "broc", "setup-state.json"),
       };
     case "win32": {
       const appData = env.APPDATA || resolve(homeDir, "AppData", "Roaming");
       const localAppData = env.LOCALAPPDATA || resolve(homeDir, "AppData", "Local");
       return {
-        configDir: resolve(appData, "browser-control"),
-        cacheDir: resolve(localAppData, "browser-control", "Cache"),
-        profilesDir: resolve(appData, "browser-control", "profiles"),
-        runtimesDir: resolve(localAppData, "browser-control", "Cache", "runtimes"),
-        stateFile: resolve(appData, "browser-control", "setup-state.json"),
+        configDir: resolve(appData, "broc"),
+        cacheDir: resolve(localAppData, "broc", "Cache"),
+        profilesDir: resolve(appData, "broc", "profiles"),
+        runtimesDir: resolve(localAppData, "broc", "Cache", "runtimes"),
+        stateFile: resolve(appData, "broc", "setup-state.json"),
       };
     }
     default:

@@ -89,30 +89,30 @@ describe("Logger", () => {
 });
 
 describe("createNodeLogger", () => {
-  const originalEnv = process.env.BROWSER_CONTROL_DEBUG;
+  const originalEnv = process.env.BROC_DEBUG;
 
   afterEach(() => {
     if (originalEnv === undefined) {
-      delete process.env.BROWSER_CONTROL_DEBUG;
+      delete process.env.BROC_DEBUG;
     } else {
-      process.env.BROWSER_CONTROL_DEBUG = originalEnv;
+      process.env.BROC_DEBUG = originalEnv;
     }
   });
 
   it("creates a logger with debug off by default", () => {
-    delete process.env.BROWSER_CONTROL_DEBUG;
+    delete process.env.BROC_DEBUG;
     const log = createNodeLogger("test");
     expect(log.isDebug).toBe(false);
   });
 
   it("creates a logger with debug on when env var is set", () => {
-    process.env.BROWSER_CONTROL_DEBUG = "1";
+    process.env.BROC_DEBUG = "1";
     const log = createNodeLogger("test");
     expect(log.isDebug).toBe(true);
   });
 
   it("creates a logger with debug on when env var is 'true'", () => {
-    process.env.BROWSER_CONTROL_DEBUG = "true";
+    process.env.BROC_DEBUG = "true";
     const log = createNodeLogger("test");
     expect(log.isDebug).toBe(true);
   });

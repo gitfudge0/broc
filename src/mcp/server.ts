@@ -531,7 +531,7 @@ function formatActionResult(
 // ---- MCP Server ----
 
 const server = new McpServer({
-  name: "browser-control",
+  name: "broc",
   version: "0.1.0",
 });
 

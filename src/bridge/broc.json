@@ -1,8 +1,8 @@
 {
-  "name": "browser_control",
-  "description": "Browser Control native messaging host for AI agent interaction",
-  "path": "/PLACEHOLDER/browser-control-bridge",
+  "name": "broc",
+  "description": "Broc native messaging host for AI agent interaction",
+  "path": "/PLACEHOLDER/broc-bridge",
   "type": "stdio",
-  "allowed_extensions": ["browser-control@anthropic.ai"],
+  "allowed_extensions": ["broc@anthropic.ai"],
   "_comment": "This is a reference template. The CLI 'install' command generates the actual manifest with the correct path and browser-specific fields (allowed_extensions for Firefox, allowed_origins for Chrome/Chromium)."
 }

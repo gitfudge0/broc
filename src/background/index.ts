@@ -484,7 +484,7 @@ async function handleBridgeMessage(message: unknown): Promise<void> {
  */
 function connectBridge(): void {
   try {
-    bridgePort = browser.runtime.connectNative("browser_control");
+    bridgePort = browser.runtime.connectNative("broc");
 
     bridgePort.onMessage.addListener((message: unknown) => {
       handleBridgeMessage(message).catch((err) => {

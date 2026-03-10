@@ -4,7 +4,7 @@ import { resolve } from "path";
 import type { BrowserType } from "./types.js";
 
 const CHROME_EXTENSION_ID = "jmdfepifjgmfnngjdkceknidfmaeoeie";
-const FIREFOX_EXTENSION_ID = "browser-control@anthropic.ai";
+const FIREFOX_EXTENSION_ID = "broc@anthropic.ai";
 
 export function getNativeManifestDependencies(browserType: BrowserType): BrowserType[] {
   switch (browserType) {
@@ -63,7 +63,7 @@ export function getNativeManifestDir(browserType: BrowserType): string {
 }
 
 export function getNativeManifestPath(browserType: BrowserType): string {
-  return resolve(getNativeManifestDir(browserType), "browser_control.json");
+  return resolve(getNativeManifestDir(browserType), "broc.json");
 }
 
 export function getProfileNativeManifestDir(profilePath: string): string {
@@ -71,13 +71,13 @@ export function getProfileNativeManifestDir(profilePath: string): string {
 }
 
 export function getProfileNativeManifestPath(profilePath: string): string {
-  return resolve(getProfileNativeManifestDir(profilePath), "browser_control.json");
+  return resolve(getProfileNativeManifestDir(profilePath), "broc.json");
 }
 
 export function buildNativeManifest(browserType: BrowserType, bridgePath: string): Record<string, unknown> {
   const base = {
-    name: "browser_control",
-    description: "Browser Control native messaging host for AI agent interaction",
+    name: "broc",
+    description: "Broc native messaging host for AI agent interaction",
     path: bridgePath,
     type: "stdio",
   };

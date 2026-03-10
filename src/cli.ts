@@ -481,7 +481,7 @@ async function installCommand(browsers: BrowserType[]): Promise<void> {
   for (const browser of browsers) {
     console.log(`  ${browser}: ${getNativeManifestPath(browser)}`);
   }
-  console.log("Use 'browser-control setup' for the full guided flow.");
+  console.log("Use 'broc setup' for the full guided flow.");
 }
 
 async function uninstallCommand(browsers: BrowserType[]): Promise<void> {
@@ -489,7 +489,7 @@ async function uninstallCommand(browsers: BrowserType[]): Promise<void> {
     const removed = await removeNativeManifest(browser);
     console.log(`[${browser}] ${removed ? "Removed" : "Not installed"}: ${getNativeManifestPath(browser)}`);
   }
-  console.log("Use 'browser-control teardown' to remove managed profiles and runtime state.");
+  console.log("Use 'broc teardown' to remove managed profiles and runtime state.");
 }
 
 async function statusCommand(browsers: BrowserType[], options: { json?: boolean } = {}): Promise<void> {
@@ -502,7 +502,7 @@ async function statusCommand(browsers: BrowserType[], options: { json?: boolean 
     return;
   }
 
-  console.log("Browser Control Status");
+  console.log("Broc Status");
   console.log("======================");
   console.log("");
   console.log(`Build artifacts: ${buildReady ? "Ready" : "Missing"}`);
@@ -619,7 +619,7 @@ async function main(): Promise<void> {
     start: () => startMcpServer(),
     unknown: async (unknownCommand: string) => {
       console.error(`Unknown command: ${unknownCommand}`);
-      console.error('Run "browser-control help" for usage.');
+      console.error('Run "broc help" for usage.');
       process.exit(1);
     },
   });

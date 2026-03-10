@@ -3,8 +3,8 @@
 //
 // Toggle via:
 //   - Extension: browser.storage.local.set({ debug: true })
-//   - Node (bridge/MCP): BROWSER_CONTROL_DEBUG=1
-//   - CLI: browser-control --debug
+//   - Node (bridge/MCP): BROC_DEBUG=1
+//   - CLI: broc --debug
 //
 // All debug output goes to:
 //   - Extension: browser console (background/content)
@@ -98,12 +98,12 @@ export class Logger {
 
 /**
  * Create a logger for the Node (bridge/MCP) side.
- * Reads BROWSER_CONTROL_DEBUG from env.
+ * Reads BROC_DEBUG from env.
  */
 export function createNodeLogger(prefix: string): Logger {
   const debug = typeof process !== "undefined" && (
-    process.env.BROWSER_CONTROL_DEBUG === "1" ||
-    process.env.BROWSER_CONTROL_DEBUG === "true"
+    process.env.BROC_DEBUG === "1" ||
+    process.env.BROC_DEBUG === "true"
   );
   return new Logger(prefix, { debug });
 }

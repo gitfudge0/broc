@@ -1,6 +1,6 @@
-# Browser Control
+# Broc
 
-Browser extension and MCP bridge for AI-driven browser control across Firefox, Chrome, and Chromium.
+Broc is a browser extension and MCP bridge for AI-driven browser control across Firefox, Chrome, and Chromium.
 
 ## Quick Start
 

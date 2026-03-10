@@ -1,4 +1,4 @@
-# Browser Control - Firefox Extension for AI Agents
+# Broc - Firefox Extension for AI Agents
 
 An AI-agent-only Firefox extension that exposes structured page observation and typed action primitives over a local bridge (native messaging), controlled by an MCP/CLI tool.
 
@@ -101,7 +101,7 @@ Build the background event page that coordinates content scripts, tabs, and the 
 
 Connect the extension to the local CLI/MCP tool via native messaging.
 
-- [x] Native host manifest JSON (`browser_control.json`)
+- [x] Native host manifest JSON (`broc.json`)
   - [x] `name`, `description`, `path`, `type: "stdio"`, `allowed_extensions`
   - [x] Platform-specific install locations documented (Linux, macOS, Windows) — in CLI help and install command
 - [x] Native host process (Node.js or Python)
@@ -135,7 +135,7 @@ Expose browser control as MCP tools for AI agents.
 - [x] Tool: `browser_wait` - wait for element or timeout
 - [x] Tool: `browser_extract` - extract text/attribute from element
 - [x] Tool: `browser_tabs` - list open tabs, switch active tab
-- [x] CLI wrapper: `browser-control` command with install/uninstall/status/help subcommands, default starts MCP server
+- [x] CLI wrapper: `broc` command with install/uninstall/status/help subcommands, default starts MCP server
 - [x] Connection management: launch native host, establish session, handle reconnects
 - [x] Response formatting: return snapshots in agent-friendly compact format
 

@@ -102,7 +102,7 @@ async function copyStatic() {
   await writeGeneratedManifests();
 
   // Native host manifest template (shared — used by CLI install command)
-  await cp("src/bridge/browser_control.json", "dist/browser_control.json");
+  await cp("src/bridge/broc.json", "dist/broc.json");
 }
 
 /**

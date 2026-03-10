@@ -98,11 +98,11 @@ export function formatBridgeRemediation(report: BridgeStatusReport): string[] {
     case "connected":
       return ["No action required."];
     case "pid_missing":
-      return ["Launch the managed browser session with 'browser-control launch --browser=<name>'."];
+      return ["Launch the managed browser session with 'broc launch --browser=<name>'."];
     case "pid_stale":
       return [
-        "Relaunch the managed browser session with 'browser-control launch --browser=<name>'.",
-        "If the stale PID file persists, remove the bridge state under /tmp/browser-control-<uid>.* and try again.",
+        "Relaunch the managed browser session with 'broc launch --browser=<name>'.",
+        "If the stale PID file persists, remove the bridge state under /tmp/broc-<uid>.* and try again.",
       ];
     case "socket_missing":
       return ["Relaunch the managed browser session so the browser extension can recreate the bridge socket."];

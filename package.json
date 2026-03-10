@@ -1,11 +1,11 @@
 {
-  "name": "browser-control",
+  "name": "broc",
   "version": "0.1.0",
-  "description": "Browser extension for AI agent browser control via native messaging (Firefox + Chrome)",
+  "description": "Broc browser automation via native messaging (Firefox + Chrome)",
   "private": true,
   "type": "module",
   "bin": {
-    "browser-control": "dist/cli.mjs"
+    "broc": "dist/cli.mjs"
   },
   "scripts": {
     "dev": "concurrently --names build,launch --prefix name --kill-others --kill-timeout 5000 -P \"npm:dev:build\" \"npm:dev:launch -- {@}\" --",
