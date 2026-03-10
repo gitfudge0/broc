@@ -40,7 +40,7 @@ import {
 } from "./cli/runtime.js";
 import { routeCliCommand } from "./cli/router.js";
 import { snapshotCommand } from "./cli/snapshot.js";
-import { VALID_BROWSERS, type BrowserType } from "./cli/types.js";
+import { VALID_BROWSERS, isBrowserType, type BrowserType } from "./cli/types.js";
 import { parseBrowserFlag, parseJsonFlag, parseNoMcpFlag } from "./cli/flags.js";
 import { orchestrateLaunchSession } from "./cli/session.js";
 import { buildHelpText } from "./cli/help.js";
