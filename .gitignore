@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.tgz
+web-ext-artifacts/
+.web-ext/
+chrome-ext.pem

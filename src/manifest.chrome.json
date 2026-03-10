@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Browser Control",
+  "version": "0.1.0",
+  "description": "AI agent browser control via native messaging",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvqpCJCX9saA7bAfZTE7UI0BKP4yCrxpisU3V4G+IPJEWGadqMs27CGF7IKQgrsRftsJ0EQs27+nrg3H8RocxqYuxRQKoUQ7Vt45J2K8jWlr9dOGZp7vK+wKAl7NDnNZSz18c07MSw9ji2lFvyl6mOCzzjEkOyl3rbas1IRIkUnDnqICNk2vAsyUAZc2EYPHs0PCplI/Oa30u185EVmsCk+kdQ8M1nElavK4Nb958vzxyvypP6DEJ8/dJcoQ9t6UgNKelKwQWaeh7gFC+5Qn9Jf+bVfQ6g/Xe5mQh5fTOi1WZ4Jo+fm1FAcy8WvHvBUgd+soTfFiLoyh9rAmdJVo1yQIDAQAB",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "tabs",
+    "nativeMessaging",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}
