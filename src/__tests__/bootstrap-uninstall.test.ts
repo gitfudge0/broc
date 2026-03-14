@@ -42,6 +42,10 @@ function createState(appPaths: AppPaths): SetupState {
     cacheDir: resolve(appPaths.runtimesDir, "chromium"),
     installedAt: new Date().toISOString(),
   };
+  state.integration = {
+    publicExecutablePath: resolve(appPaths.dataDir, "public-bin", "broc"),
+    pathBlockFiles: [resolve(appPaths.configDir, ".zshrc")],
+  };
   return state;
 }
 
@@ -93,15 +97,21 @@ describe("bootstrap uninstall", () => {
 
     const removeRuntime = vi.fn(async () => {});
     const removeNativeManifests = vi.fn(async () => {});
+    const removePublicExecutable = vi.fn(async () => {});
+    const removePathBlocks = vi.fn(async () => {});
 
     await resetInstalledRuntimeWithDeps(appPaths, {
       removeRuntime,
       removeNativeManifests,
+      removePublicExecutable,
+      removePathBlocks,
       isProfileLocked: () => false,
     }, state);
 
     expect(removeRuntime).toHaveBeenCalledWith(state.managedChromium);
     expect(removeNativeManifests).toHaveBeenCalledOnce();
+    expect(removePublicExecutable).toHaveBeenCalledWith(state.integration?.publicExecutablePath);
+    expect(removePathBlocks).toHaveBeenCalledWith(state.integration?.pathBlockFiles);
     expect(await exists(appPaths.wrapperPath)).toBe(false);
     expect(await exists(appPaths.activeInstallFile)).toBe(false);
     expect(await exists(appPaths.installsDir)).toBe(false);

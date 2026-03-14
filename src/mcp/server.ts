@@ -19,6 +19,7 @@
 import { access } from "fs/promises";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
+import { spawn } from "child_process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -39,6 +40,7 @@ import { createNodeLogger } from "../shared/logger.js";
 import { getAppPaths, getRepoPaths } from "../cli/paths.js";
 import { normalizeProfilePath } from "../cli/profile-paths.js";
 import { loadSetupState } from "../cli/state.js";
+import type { BrowserType } from "../cli/types.js";
 import {
   applyBridgePresentation,
   collectBrowserStatusReport,
@@ -83,6 +85,7 @@ let nextApprovalId = 1;
 /** Approval timeout in ms (2 minutes) */
 const APPROVAL_TIMEOUT_MS = 120_000;
 let bridgeWasConnected = false;
+let bridgeAutostartPromise: Promise<void> | null = null;
 
 // ---- Snapshot formatting ----
 
@@ -277,6 +280,14 @@ async function bridgeError(err: unknown): Promise<{ type: "text"; text: string }
 }
 
 async function ensureBridgeReady(): Promise<void> {
+  await ensureBridgeReadyForRequest({ allowAutostart: false });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function connectAndPingBridge(): Promise<void> {
   if (!bridge.isConnected()) {
     await bridge.start();
   }
@@ -293,8 +304,136 @@ async function ensureBridgeReady(): Promise<void> {
   bridgeWasConnected = true;
 }
 
+function selectAutostartBrowser(state: Awaited<ReturnType<typeof loadSetupState>>): BrowserType | null {
+  if (!state) return null;
+
+  if (state.browsers.chromium) return "chromium";
+  if (state.browsers.chrome) return "chrome";
+  if (state.browsers.firefox) return "firefox";
+  return null;
+}
+
+function shouldAttemptAutostart(error: unknown): boolean {
+  if (!(error instanceof BridgeClientError)) {
+    return false;
+  }
+
+  return error.code === "SOCKET_MISSING"
+    || error.code === "CONNECT_FAILED"
+    || error.code === "NOT_CONNECTED";
+}
+
+async function waitForBridgeAfterAutostart(timeoutMs = 15000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const client = new BridgeClient({ connectTimeout: 500, timeout: 1000 });
+    try {
+      await client.start();
+      const pong = await client.ping(1000);
+      if (pong.alive) {
+        return;
+      }
+    } catch {
+      // Ignore transient startup failures while the browser and extension come up.
+    } finally {
+      client.stop();
+    }
+
+    await sleep(200);
+  }
+
+  throw new BridgeClientError(
+    "PING_FAILED",
+    "Managed browser launch did not make the bridge ready in time.",
+    { socketPath: getSocketPath(), pidPath: getPidPath() },
+  );
+}
+
+async function autostartBrowserForRequest(): Promise<void> {
+  if (bridgeAutostartPromise) {
+    return bridgeAutostartPromise;
+  }
+
+  bridgeAutostartPromise = (async () => {
+    const state = await loadSetupState(appPaths.stateFile, {
+      activeWrapperPath: appPaths.wrapperPath,
+      defaultManagedProfilePath: normalizeProfilePath(appPaths.profilesDir, "chromium"),
+    });
+    const browser = selectAutostartBrowser(state);
+
+    if (!state || !browser) {
+      throw new Error("No prepared Broc browser runtime is available. Run './scripts/install.sh' first.");
+    }
+
+    const isRepoDevState = state.installRoot === repoPaths.repoRoot && state.dist.root === repoPaths.distDir;
+    const command = isRepoDevState ? process.execPath : state.activeWrapperPath;
+    const args = isRepoDevState
+      ? [repoPaths.cliPath, "launch", `--browser=${browser}`, "--no-mcp"]
+      : ["launch", `--browser=${browser}`, "--no-mcp"];
+
+    const child = spawn(command, args, {
+      cwd: repoPaths.repoRoot,
+      env: { ...process.env },
+      stdio: "ignore",
+      detached: true,
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+
+      child.once("spawn", () => {
+        settled = true;
+        resolve();
+      });
+
+      child.once("error", (error) => {
+        if (!settled) {
+          settled = true;
+          reject(error);
+        }
+      });
+
+      child.once("exit", (code) => {
+        if (!settled && code !== null && code !== 0) {
+          settled = true;
+          reject(new Error(`Browser autostart exited before startup completed (code ${code}).`));
+        }
+      });
+    });
+
+    child.unref();
+    await waitForBridgeAfterAutostart();
+  })().finally(() => {
+    bridgeAutostartPromise = null;
+  });
+
+  return bridgeAutostartPromise;
+}
+
+async function ensureBridgeReadyForRequest(options: { allowAutostart: boolean }): Promise<void> {
+  if (options.allowAutostart && !bridge.isConnected()) {
+    const report = await collectStatusForError();
+    if (report.bridge.phase !== "connected" && report.bridge.phase !== "socket_unreachable" && report.bridge.phase !== "ping_failed" && report.bridge.phase !== "disconnected") {
+      await autostartBrowserForRequest();
+    }
+  }
+
+  try {
+    await connectAndPingBridge();
+  } catch (error) {
+    if (!options.allowAutostart || !shouldAttemptAutostart(error)) {
+      throw error;
+    }
+
+    bridge.stop();
+    await autostartBrowserForRequest();
+    await connectAndPingBridge();
+  }
+}
+
 async function requestBridge(message: Record<string, unknown>): Promise<unknown> {
-  await ensureBridgeReady();
+  await ensureBridgeReadyForRequest({ allowAutostart: true });
   return bridge.request(message);
 }
 

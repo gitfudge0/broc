@@ -170,6 +170,20 @@ describe("bootstrap staging", () => {
         events.push("provision");
         return createProvisionedState(appPaths, stagedPaths.repoRoot);
       }),
+      installPublicExecutable: vi.fn(async () => ({
+        publicBinDir: resolve(tempDir!, "public-bin"),
+        executablePath: resolve(tempDir!, "public-bin", "broc"),
+        mode: "symlink",
+        updated: true,
+      })),
+      ensurePathSetup: vi.fn(async () => ({
+        publicBinDir: resolve(tempDir!, "public-bin"),
+        alreadyOnPath: false,
+        updatedFiles: [resolve(tempDir!, ".zshrc")],
+        manualInstructions: [],
+        activationHint: "Run 'source ~/.zshrc' or open a new shell before using broc.",
+        warnings: [],
+      })),
     });
 
     expect(events).toEqual(["install-deps", "provision"]);
@@ -179,5 +193,7 @@ describe("bootstrap staging", () => {
       installVersion: "1.2.3",
       installRoot: result.stagedPaths.repoRoot,
     });
+    expect(result.publicBin.executablePath).toBe(resolve(tempDir!, "public-bin", "broc"));
+    expect(result.pathSetup.updatedFiles).toEqual([resolve(tempDir!, ".zshrc")]);
   });
 });

@@ -35,6 +35,10 @@ describe("parseClientFlag", () => {
   it("parses a supported client", () => {
     expect(parseClientFlag(["mcp-config", "--client=codex"])).toBe("codex");
   });
+
+  it("parses opencode as a supported client", () => {
+    expect(parseClientFlag(["mcp-config", "--client=opencode"])).toBe("opencode");
+  });
 });
 
 describe("parseBrowserFlag", () => {

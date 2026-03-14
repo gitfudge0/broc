@@ -42,7 +42,7 @@ export async function runUninstall(dependencyOverrides = {}) {
     await deps.runCommand("npm", ["run", "build:runtime"]);
   }
 
-  await deps.runCommand("node", [distCli, "reset"]);
+  await deps.runCommand("node", [distCli, "uninstall"]);
 
   deps.log("Broc uninstall complete.");
   deps.log("  staged runtime removed");

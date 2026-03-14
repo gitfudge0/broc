@@ -35,15 +35,27 @@ cd broc
 # 2. Install Broc into the staged home-directory runtime
 ./scripts/install.sh
 
-# 3. Print or copy the MCP config
-broc mcp-config --copy
+# 3. Open a new shell if PATH changed, then start Broc's MCP server
+broc
+
+# 4. Launch the managed browser when you actually need it
+broc launch
+
+# 5. Print or copy the MCP config for your client
+broc mcp-config --client=codex --copy
 ```
 
-The installer runs `npm ci`, builds the Chromium-only runtime bundle, stages a stable install under your home directory, installs the production runtime dependencies needed by that staged copy, provisions managed Chromium, prepares the managed profile, installs the profile-local native messaging manifest, and writes the stable `broc` wrapper path used by MCP clients.
+The installer runs `npm ci`, builds the Chromium-only runtime bundle, stages a stable install under your home directory, installs the production runtime dependencies needed by that staged copy, provisions managed Chromium, prepares the managed profile, installs the profile-local native messaging manifest, writes the stable managed wrapper path used by MCP clients, creates a public `broc` executable in a user bin directory, updates shell `PATH` config when needed, detects likely MCP clients, and prints client-specific configuration instructions.
 
-After install, the MCP client must launch the staged wrapper, not the repo checkout. `broc mcp-config` always emits the correct absolute command path, and the staged runtime does not depend on the source checkout remaining present.
+After install, the MCP client must launch the staged wrapper, not the repo checkout. `broc mcp-config` always emits the correct absolute command path, and the staged runtime does not depend on the source checkout remaining present. Generated MCP config runs `broc serve`, so clients get tools without eagerly opening the browser; browser-backed requests can launch the managed browser on demand. Broc does not edit MCP client config files automatically.
 
 ### Uninstall
+
+```bash
+broc uninstall
+```
+
+Equivalent shell entrypoint:
 
 ```bash
 ./scripts/uninstall.sh
@@ -55,6 +67,7 @@ This removes Broc-owned staged/runtime artifacts outside the repo checkout:
 - managed Chromium runtime cache
 - the managed Broc profile
 - the staged wrapper under the Broc data directory
+- the public `broc` executable and managed shell PATH block
 - Broc state files and best-effort legacy Broc native manifests
 
 It does not remove the repo checkout and it does not edit MCP client configuration automatically. Remove the Broc MCP config snippet manually if you no longer want Broc configured.
@@ -72,6 +85,11 @@ It does not remove the repo checkout and it does not edit MCP client configurati
 Stable wrapper:
 
 - `<dataDir>/bin/broc`
+
+Public CLI:
+
+- `~/.local/bin/broc` by default
+- `~/bin/broc` when `~/bin` already exists and is already on `PATH`
 
 Versioned staged install:
 
@@ -128,7 +146,8 @@ The staged installer uses the managed Chromium profile-local native messaging ma
 {
   "mcpServers": {
     "broc": {
-      "command": "/absolute/path/to/<dataDir>/bin/broc"
+      "command": "/absolute/path/to/<dataDir>/bin/broc",
+      "args": ["serve"]
     }
   }
 }
@@ -138,17 +157,19 @@ The staged installer uses the managed Chromium profile-local native messaging ma
 
 | Command | Description |
 |---------|-------------|
-| *(none)* | Start the MCP server (default) |
-| `launch` | Launch the managed Chromium browser and start the MCP server |
+| *(none)* | Start the MCP server only; browser-backed MCP requests launch the managed browser on demand |
+| `launch` | Explicitly launch the managed Chromium browser and start the MCP server |
+| `serve` | Start only the MCP server for agent integrations and MCP clients |
 | `status` | Show build, setup, and bridge status |
 | `mcp-config` | Print the staged-wrapper MCP config |
-| `reset` | Fully uninstall the staged runtime and managed browser state |
+| `uninstall` | Fully uninstall the staged runtime and managed browser state |
+| `reset` | Compatibility alias for `uninstall` |
 | `snapshot` | Capture and pretty-print current page |
 | `help` | Show usage information |
 
-Legacy compatibility commands still exist for repo/development workflows: `setup`, `teardown`, `install`, `uninstall`. They are repo/dev compatibility paths, not supported staged-runtime targets.
+Legacy compatibility commands still exist for repo/development workflows: `setup`, `teardown`, `install`, `uninstall-native-host`. They are repo/dev compatibility paths, not supported staged-runtime targets.
 
-**Options:** `--url=<url>` (open URL in a fresh tab after launch; default `https://www.google.com`), `--no-mcp` (launch browser only), `--json` (machine-readable output for `status` and `snapshot`), `--client=generic|claude-code|codex`, `--copy`
+**Options:** `--url=<url>` (open URL in a fresh tab after launch; default `https://www.google.com`), `--no-mcp` (launch browser only), `--json` (machine-readable output for `status` and `snapshot`), `--client=generic|claude-code|codex|opencode`, `--copy`
 
 **Snapshot options:** `--verbose` / `-v`, `--json`, `--tab=<id>`
 
@@ -156,7 +177,9 @@ Legacy compatibility commands still exist for repo/development workflows: `setup
 
 - `broc status --json` prints the canonical machine-readable health report for CLI callers.
 - `browser_status` is the MCP-side health tool and returns the same bridge phase data plus a human-readable summary.
-- The MCP server now starts in degraded mode when the bridge is absent. In that state, `browser_status` still works and bridge-backed tools return targeted remediation instead of crashing the process at startup.
+- `broc` and `broc serve` start MCP without launching the browser. Use `broc launch` for an immediate full-stack session.
+- The MCP server still starts in degraded mode when the bridge is absent. In that state, `browser_status` still works and bridge-backed tools return targeted remediation instead of crashing the process at startup.
+- Browser-backed MCP tools attempt a managed browser autostart when no bridge session exists yet.
 - When Broc is not installed, `status` points back to `./scripts/install.sh`. If Broc was already removed, `./scripts/uninstall.sh` is not needed.
 - Chromium stderr lines such as Wayland image-description warnings or `google_apis ... DEPRECATED_ENDPOINT` are not treated as bridge health failures.
 - If launch reports `Unknown request type: open_tab`, the browser is running a stale extension worker. The launcher now warns and continues, and a fresh `npm run build` + relaunch updates the generated dist manifest version so Chrome-family profiles reload the extension code.
@@ -395,7 +418,7 @@ These remain available, but they are no longer top-level npm scripts:
 
 - `node dist/cli.mjs status`
 - `node dist/cli.mjs teardown`
-- `node dist/cli.mjs uninstall`
+- `node dist/cli.mjs uninstall-native-host`
 - `npx tsc --noEmit`
 - `npx web-ext lint --source-dir dist/firefox`
 
@@ -416,6 +439,6 @@ FIREFOX=/path/to/firefox-nightly npm run dev -- --browser=firefox
 
 ```bash
 node dist/cli.mjs teardown --browser=firefox   # Managed setup cleanup
-node dist/cli.mjs uninstall --browser=chrome   # Legacy native-host-only cleanup
+node dist/cli.mjs uninstall-native-host --browser=chrome   # Legacy native-host-only cleanup
 npm run clean -- --all                         # Full repo + managed cleanup
 ```

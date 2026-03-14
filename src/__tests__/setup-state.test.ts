@@ -70,10 +70,10 @@ describe("setup state", () => {
     expect(loaded?.browsers.firefox?.profilePath).toBe("/profiles/firefox");
 
     const content = JSON.parse(await readFile(stateFile, "utf-8")) as { schemaVersion: number };
-    expect(content.schemaVersion).toBe(2);
+    expect(content.schemaVersion).toBe(3);
   });
 
-  it("migrates legacy schema-1 state into schema-2 shape", async () => {
+  it("migrates legacy schema-1 state into schema-3 shape", async () => {
     tempDir = await mkdtemp(resolve(tmpdir(), "broc-state-"));
     const stateFile = resolve(tempDir, "setup-state.json");
 
@@ -112,13 +112,39 @@ describe("setup state", () => {
 
     const loaded = await loadSetupState(stateFile, loadOptions);
     expect(loaded).not.toBeNull();
-    expect(loaded?.schemaVersion).toBe(2);
+    expect(loaded?.schemaVersion).toBe(3);
     expect(loaded?.installVersion).toBe("repo-dev");
     expect(loaded?.installRoot).toBe("/repo");
     expect(loaded?.activeWrapperPath).toBe(loadOptions.activeWrapperPath);
     expect(loaded?.managedProfilePath).toBe("/profiles/chromium");
     expect(loaded?.migratedFromLegacy).toBe(true);
     expect(loaded?.browsers.chromium?.manifestMode).toBe("both");
+  });
+
+  it("migrates schema-2 state into schema-3 with integration metadata defaults", async () => {
+    tempDir = await mkdtemp(resolve(tmpdir(), "broc-state-"));
+    const stateFile = resolve(tempDir, "setup-state.json");
+
+    await writeFile(stateFile, JSON.stringify({
+      schemaVersion: 2,
+      installVersion: "0.1.0",
+      installRoot: "/repo",
+      activeWrapperPath: "/home/tester/.local/share/broc/bin/broc",
+      managedProfilePath: "/profiles/chromium",
+      updatedAt: "2026-03-14T00:00:00.000Z",
+      dist: {
+        root: "/repo/dist",
+        bridgePath: "/repo/dist/bridge.mjs",
+        mcpServerPath: "/repo/dist/mcp-server.mjs",
+        chromeExtensionDir: "/repo/dist/chrome",
+      },
+      nativeManifestOwners: {},
+      browsers: {},
+    }, null, 2));
+
+    const loaded = await loadSetupState(stateFile, loadOptions);
+    expect(loaded?.schemaVersion).toBe(3);
+    expect(loaded?.integration).toEqual({});
   });
 
   it("rejects invalid state content", () => {

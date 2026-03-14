@@ -12,7 +12,7 @@ describe("runUninstall", () => {
     });
 
     expect(runCommand).toHaveBeenNthCalledWith(1, "npm", ["run", "build:runtime"]);
-    expect(runCommand).toHaveBeenNthCalledWith(2, "node", [expect.stringContaining("dist/cli.mjs"), "reset"]);
+    expect(runCommand).toHaveBeenNthCalledWith(2, "node", [expect.stringContaining("dist/cli.mjs"), "uninstall"]);
   });
 
   it("skips the build when dist/cli.mjs already exists", async () => {
@@ -26,7 +26,7 @@ describe("runUninstall", () => {
     });
 
     expect(runCommand).toHaveBeenCalledOnce();
-    expect(runCommand).toHaveBeenCalledWith("node", [expect.stringContaining("dist/cli.mjs"), "reset"]);
+    expect(runCommand).toHaveBeenCalledWith("node", [expect.stringContaining("dist/cli.mjs"), "uninstall"]);
   });
 
   it("prints the uninstall summary", async () => {

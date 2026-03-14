@@ -4,14 +4,18 @@ import { resolve } from "path";
 import type { AppPaths, RepoPaths } from "./paths.js";
 import { getInstallRoot, getRepoPaths } from "./paths.js";
 import { installProfileNativeManifest, removeNativeManifest } from "./native-host.js";
+import { ensurePathSetup, removeManagedPathBlocks } from "./path-setup.js";
 import { normalizeProfilePath } from "./profile-paths.js";
+import { installPublicExecutable, removePublicExecutable } from "./public-bin.js";
 import {
   ensureManagedChromium,
   ensureProfileDir,
   isProfileLocked,
   removeManagedChromium,
+  resolveExecutable,
 } from "./runtime.js";
 import { createEmptySetupState, loadSetupState, saveSetupState, type SetupState } from "./state.js";
+import type { PathSetupResult, PublicBinInstallResult } from "./types.js";
 
 export interface ActiveInstallRecord {
   installVersion: string;
@@ -278,7 +282,15 @@ export async function finalizeInstalledRuntime(
   stagedPaths: RepoPaths,
   installVersion: string,
   state: SetupState,
+  integration?: {
+    publicBin?: PublicBinInstallResult;
+    pathSetup?: PathSetupResult;
+  },
 ): Promise<void> {
+  state.integration = {
+    publicExecutablePath: integration?.publicBin?.executablePath,
+    pathBlockFiles: integration?.pathSetup?.updatedFiles ?? [],
+  };
   await saveSetupState(appPaths.stateFile, state);
   await writeActiveInstall(appPaths, {
     installVersion,
@@ -294,16 +306,26 @@ export async function installFromRepoBuild(
   deps: {
     runCommand?: CommandRunner;
     provisionRuntime?: typeof provisionStagedRuntime;
+    installPublicExecutable?: typeof installPublicExecutable;
+    ensurePathSetup?: typeof ensurePathSetup;
   } = {},
-): Promise<{ installVersion: string; stagedPaths: RepoPaths; state: SetupState }> {
+): Promise<{
+  installVersion: string;
+  stagedPaths: RepoPaths;
+  state: SetupState;
+  publicBin: PublicBinInstallResult;
+  pathSetup: PathSetupResult;
+}> {
   await ensureAppDirs(appPaths);
   const installVersion = await resolveInstallVersion(repoPaths);
   const stagedPaths = await stageRuntimeArtifacts(appPaths, repoPaths, installVersion, {
     runCommand: deps.runCommand,
   });
   const state = await (deps.provisionRuntime ?? provisionStagedRuntime)(appPaths, stagedPaths, installVersion);
-  await finalizeInstalledRuntime(appPaths, stagedPaths, installVersion, state);
-  return { installVersion, stagedPaths, state };
+  const publicBin = await (deps.installPublicExecutable ?? installPublicExecutable)(appPaths.wrapperPath);
+  const pathSetup = await (deps.ensurePathSetup ?? ensurePathSetup)(publicBin.publicBinDir);
+  await finalizeInstalledRuntime(appPaths, stagedPaths, installVersion, state, { publicBin, pathSetup });
+  return { installVersion, stagedPaths, state, publicBin, pathSetup };
 }
 
 export function buildMcpConfig(wrapperPath: string, client = "generic"): string {
@@ -311,12 +333,19 @@ export function buildMcpConfig(wrapperPath: string, client = "generic"): string 
     mcpServers: {
       broc: {
         command: wrapperPath,
+        args: ["serve"],
       },
     },
   };
 
-  if (client === "claude-code" || client === "codex") {
-    return JSON.stringify(generic, null, 2);
+  if (client === "opencode") {
+    return JSON.stringify({
+      broc: {
+        type: "local",
+        command: [wrapperPath, "serve"],
+        enabled: true,
+      },
+    }, null, 2);
   }
 
   return JSON.stringify(generic, null, 2);
@@ -340,6 +369,13 @@ export function copyTextToClipboard(text: string): boolean {
   return false;
 }
 
+export function canCopyTextToClipboard(env: NodeJS.ProcessEnv = process.env): boolean {
+  const candidates = process.platform === "darwin"
+    ? ["pbcopy"]
+    : ["wl-copy", "xclip", "xsel"];
+  return candidates.some((command) => !!resolveExecutable(command, env));
+}
+
 export async function resetInstalledRuntime(appPaths: AppPaths): Promise<void> {
   const state = await loadSetupState(appPaths.stateFile, getLoadStateOptions(appPaths));
   const managedProfilePath = state?.managedProfilePath || normalizeProfilePath(appPaths.profilesDir, "chromium");
@@ -359,6 +395,8 @@ export async function resetInstalledRuntimeWithDeps(
     removeRuntime?: typeof removeManagedChromium;
     isProfileLocked?: typeof isProfileLocked;
     removeNativeManifests?: typeof removeLegacyNativeManifests;
+    removePublicExecutable?: typeof removePublicExecutable;
+    removePathBlocks?: typeof removeManagedPathBlocks;
   } = {},
   preloadedState?: SetupState | null,
   managedProfilePathOverride?: string,
@@ -375,6 +413,9 @@ export async function resetInstalledRuntimeWithDeps(
   if (state?.managedChromium) {
     await (deps.removeRuntime ?? removeManagedChromium)(state.managedChromium);
   }
+
+  await (deps.removePublicExecutable ?? removePublicExecutable)(state?.integration?.publicExecutablePath);
+  await (deps.removePathBlocks ?? removeManagedPathBlocks)(state?.integration?.pathBlockFiles);
 
   await Promise.all([
     rm(appPaths.activeInstallFile, { force: true }),

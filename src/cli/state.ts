@@ -2,7 +2,8 @@ import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import { dirname } from "path";
 import type { BrowserType } from "./types.js";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
+const PREVIOUS_SCHEMA_VERSION = 2;
 const LEGACY_SCHEMA_VERSION = 1;
 
 export type BrowserManifestMode = "global" | "profile" | "both";
@@ -41,6 +42,33 @@ export interface SetupState {
   nativeManifestOwners: Partial<Record<BrowserType, BrowserType[]>>;
   browsers: Partial<Record<BrowserType, BrowserSetupState>>;
   managedChromium?: ManagedChromiumState;
+  integration?: {
+    publicExecutablePath?: string;
+    pathBlockFiles?: string[];
+  };
+  migratedFromLegacy?: boolean;
+}
+
+interface PreviousSetupState {
+  schemaVersion: number;
+  installVersion: string;
+  installRoot: string;
+  activeWrapperPath: string;
+  managedProfilePath: string;
+  updatedAt: string;
+  dist: {
+    root: string;
+    bridgePath: string;
+    mcpServerPath: string;
+    chromeExtensionDir: string;
+  };
+  nativeManifestOwners: Partial<Record<BrowserType, BrowserType[]>>;
+  browsers: Partial<Record<BrowserType, BrowserSetupState>>;
+  managedChromium?: ManagedChromiumState;
+  integration?: {
+    publicExecutablePath?: string;
+    pathBlockFiles?: string[];
+  };
   migratedFromLegacy?: boolean;
 }
 
@@ -126,9 +154,46 @@ function isManagedChromiumState(value: unknown): value is ManagedChromiumState {
     typeof value.installedAt === "string";
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
+function isIntegrationState(value: unknown): value is NonNullable<SetupState["integration"]> {
+  if (value === undefined) return true;
+  if (!isStringRecord(value)) return false;
+  if (value.publicExecutablePath !== undefined && typeof value.publicExecutablePath !== "string") return false;
+  if (value.pathBlockFiles !== undefined && !isStringArray(value.pathBlockFiles)) return false;
+  return true;
+}
+
 export function isSetupState(value: unknown): value is SetupState {
   if (!isStringRecord(value)) return false;
   if (value.schemaVersion !== SCHEMA_VERSION) return false;
+  if (
+    typeof value.installVersion !== "string" ||
+    typeof value.installRoot !== "string" ||
+    typeof value.activeWrapperPath !== "string" ||
+    typeof value.managedProfilePath !== "string" ||
+    typeof value.updatedAt !== "string"
+  ) {
+    return false;
+  }
+  if (!isStringRecord(value.dist)) return false;
+  if (typeof value.dist.root !== "string") return false;
+  if (typeof value.dist.bridgePath !== "string") return false;
+  if (typeof value.dist.mcpServerPath !== "string") return false;
+  if (typeof value.dist.chromeExtensionDir !== "string") return false;
+  if (!isBrowserOwnerMap(value.nativeManifestOwners)) return false;
+  if (!isStringRecord(value.browsers)) return false;
+  if (!Object.values(value.browsers).every((entry) => entry === undefined || isBrowserSetupState(entry))) return false;
+  if (value.managedChromium !== undefined && !isManagedChromiumState(value.managedChromium)) return false;
+  if (!isIntegrationState(value.integration)) return false;
+  return true;
+}
+
+function isPreviousSetupState(value: unknown): value is PreviousSetupState {
+  if (!isStringRecord(value)) return false;
+  if (value.schemaVersion !== PREVIOUS_SCHEMA_VERSION) return false;
   if (
     typeof value.installVersion !== "string" ||
     typeof value.installRoot !== "string" ||
@@ -213,7 +278,16 @@ function migrateLegacySetupState(
     nativeManifestOwners: legacyState.nativeManifestOwners,
     browsers: migratedBrowsers,
     managedChromium: legacyState.managedChromium,
+    integration: {},
     migratedFromLegacy: true,
+  };
+}
+
+function migratePreviousSetupState(previousState: PreviousSetupState): SetupState {
+  return {
+    ...previousState,
+    schemaVersion: SCHEMA_VERSION,
+    integration: previousState.integration ?? {},
   };
 }
 
@@ -245,6 +319,9 @@ export async function loadSetupState(
     const parsed = JSON.parse(content) as unknown;
     if (isSetupState(parsed)) {
       return parsed;
+    }
+    if (isPreviousSetupState(parsed)) {
+      return migratePreviousSetupState(parsed);
     }
     if (options && isLegacySetupState(parsed)) {
       return migrateLegacySetupState(parsed, options);

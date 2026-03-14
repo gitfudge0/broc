@@ -3,6 +3,7 @@ import { access, rm } from "fs/promises";
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 import { BridgeClient, getPidPath, getSocketPath, isBridgeRunning } from "./mcp/bridge-client.js";
+import { resolveCliCommand, stripResolvedCommand } from "./cli/command.js";
 import {
   buildChromiumLaunchPlan,
   buildFirefoxLaunchPlan,
@@ -24,12 +25,15 @@ import {
 import { getAppPaths, getRepoPaths } from "./cli/paths.js";
 import {
   buildMcpConfig,
+  canCopyTextToClipboard,
   copyTextToClipboard,
   ensureAppDirs,
   installFromRepoBuild,
   resetInstalledRuntime,
 } from "./cli/bootstrap.js";
+import { detectInstalledClients } from "./cli/client-detect.js";
 import { normalizeProfilePath } from "./cli/profile-paths.js";
+import { renderInstallSummary } from "./cli/install-summary.js";
 import {
   createEmptySetupState,
   deleteSetupState,
@@ -500,7 +504,7 @@ async function installCommand(browsers: BrowserType[]): Promise<void> {
   console.log("Use 'broc setup' for the full guided flow.");
 }
 
-async function uninstallCommand(browsers: BrowserType[]): Promise<void> {
+async function uninstallNativeHostCommand(browsers: BrowserType[]): Promise<void> {
   for (const browser of browsers) {
     const removed = await removeNativeManifest(browser);
     console.log(`[${browser}] ${removed ? "Removed" : "Not installed"}: ${getNativeManifestPath(browser)}`);
@@ -614,29 +618,40 @@ async function mcpConfigCommand(options: { client: ReturnType<typeof parseClient
   console.log(config);
 }
 
-async function resetCommand(): Promise<void> {
+async function fullUninstallCommand(): Promise<void> {
   await resetInstalledRuntime(appPaths);
   console.log("Broc uninstall complete.");
   console.log("  staged runtime removed");
   console.log("  managed Chromium removed");
   console.log("  managed profile removed");
+  console.log("  public broc command removed");
+  console.log("  managed PATH block removed");
   console.log("  repo checkout left intact");
   console.log("  remove the MCP client config snippet manually if you no longer want Broc configured");
 }
 
 async function stageInstallCommand(options: { client: ReturnType<typeof parseClientFlag>; copy: boolean }): Promise<void> {
   await ensureDistReady();
-  const { installVersion, stagedPaths, state } = await installFromRepoBuild(appPaths, repoPaths);
+  const { installVersion, stagedPaths, state, publicBin, pathSetup } = await installFromRepoBuild(appPaths, repoPaths);
+  const detectedClients = detectInstalledClients();
+  const preferredClients = detectedClients.filter((client) => client.status !== "not_found");
 
-  console.log("Install complete.");
-  console.log(`  version: ${installVersion}`);
-  console.log(`  install root: ${stagedPaths.repoRoot}`);
-  console.log(`  wrapper: ${appPaths.wrapperPath}`);
-  if (state.managedChromium) {
-    console.log(`  runtime: ${state.managedChromium.executablePath}`);
+  if (options.copy) {
+    const preferredClient = preferredClients[0]?.client ?? options.client;
+    const copied = copyTextToClipboard(buildMcpConfig(appPaths.wrapperPath, preferredClient));
+    console.log(copied ? `Copied ${preferredClient} MCP config to the clipboard.` : "Could not copy MCP config to the clipboard automatically.");
   }
-  console.log("");
-  await mcpConfigCommand(options);
+
+  console.log(renderInstallSummary({
+    installVersion,
+    installRoot: stagedPaths.repoRoot,
+    managedRuntimePath: state.managedChromium?.executablePath ?? null,
+    wrapperPath: appPaths.wrapperPath,
+    publicExecutablePath: publicBin.executablePath,
+    pathSetup,
+    detectedClients,
+    copySupported: canCopyTextToClipboard(),
+  }));
 }
 
 async function startMcpServer(): Promise<void> {
@@ -663,29 +678,31 @@ async function showHelp(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const command = process.argv[2] || "";
-  const argv = process.argv.slice(3);
-  const browserFlag = parseBrowserFlag(process.argv.slice(2), process.env);
+  const rawArgv = process.argv.slice(2);
+  const command = resolveCliCommand(rawArgv);
+  const argv = stripResolvedCommand(rawArgv, command);
+  const browserFlag = parseBrowserFlag(rawArgv, process.env);
   const browsers = targetBrowsers(browserFlag);
-  const url = parseUrlFlag(process.argv.slice(2));
-  const startMcp = !parseNoMcpFlag(process.argv.slice(2));
-  const jsonOutput = parseJsonFlag(process.argv.slice(2));
-  const client = parseClientFlag(process.argv.slice(2));
-  const copy = parseCopyFlag(process.argv.slice(2));
+  const url = parseUrlFlag(rawArgv);
+  const startMcp = !parseNoMcpFlag(rawArgv);
+  const jsonOutput = parseJsonFlag(rawArgv);
+  const client = parseClientFlag(rawArgv);
+  const copy = parseCopyFlag(rawArgv);
 
   await routeCliCommand(command, {
     setup: () => setupCommand(browsers),
     launch: () => launchCommand(browserFlag ?? "chromium", url, { startMcp }),
+    serve: () => startMcpServer(),
     teardown: () => teardownCommand(browsers),
     install: () => installCommand(browsers),
-    uninstall: () => uninstallCommand(browsers),
+    uninstall: () => fullUninstallCommand(),
+    uninstallNativeHost: () => uninstallNativeHostCommand(browsers),
     status: () => statusCommand(browsers, { json: jsonOutput }),
     mcpConfig: () => mcpConfigCommand({ client, copy }),
-    reset: () => resetCommand(),
+    reset: () => fullUninstallCommand(),
     stageInstall: () => stageInstallCommand({ client, copy }),
     snapshot: () => snapshotCommand(argv),
     help: () => showHelp(),
-    start: () => startMcpServer(),
     unknown: async (unknownCommand: string) => {
       console.error(`Unknown command: ${unknownCommand}`);
       console.error('Run "broc help" for usage.');

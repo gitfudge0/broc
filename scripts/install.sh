@@ -33,4 +33,5 @@ echo "Building Broc runtime..."
 npm run build:runtime
 
 echo "Staging Broc into the managed runtime directory..."
+echo "Installing the public broc command, wiring PATH if needed, and printing MCP client instructions..."
 node dist/cli.mjs stage-install --copy "$@"

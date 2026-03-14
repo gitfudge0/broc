@@ -2,7 +2,7 @@
 
 Broc is a repo-installed, staged-runtime browser control package for AI agents.
 
-The install flow builds from this checkout once, stages a stable runtime under your home directory, installs the production runtime dependencies it needs, downloads a managed Chromium, prepares the native messaging bridge, and prints the MCP config you paste into your agent client.
+The install flow builds from this checkout once, stages a stable runtime under your home directory, installs the runtime dependencies it needs, downloads a managed Chromium, prepares the native messaging bridge, creates a public `broc` command, wires `PATH` when needed, detects likely MCP clients, and prints the exact MCP config you paste into your agent client.
 
 ## Quick Start
 
@@ -10,15 +10,27 @@ The install flow builds from this checkout once, stages a stable runtime under y
 ./scripts/install.sh
 ```
 
-After install:
+After install, open a new shell if Broc updated your `PATH`, then start the managed browser and stack when you want an interactive Broc session:
 
 ```bash
-broc mcp-config --copy
+broc
 ```
 
-Paste the generated config into your MCP client. The staged wrapper path is absolute, self-contained, and does not point at the repo checkout.
+To configure your MCP client afterward:
+
+```bash
+broc mcp-config --client=codex --copy
+```
+
+Supported config targets are `generic`, `codex`, `claude-code`, and `opencode`. Generated MCP config starts `broc serve`, which keeps MCP available without opening the browser until a browser-backed task needs it. Install prints client-specific instructions but does not modify any MCP client config files.
 
 ## Uninstall
+
+```bash
+broc uninstall
+```
+
+Equivalent shell entrypoint:
 
 ```bash
 ./scripts/uninstall.sh
@@ -30,6 +42,7 @@ This removes Broc-owned staged/runtime assets outside the repo checkout:
 - managed Chromium runtime cache
 - managed Broc profile
 - stable wrapper under the Broc data directory
+- public `broc` executable and managed `PATH` block
 - Broc setup state and best-effort legacy native manifests
 
 It does not remove the repo checkout or your MCP client config snippet. Remove the client config manually if you no longer want Broc configured.
@@ -38,11 +51,13 @@ It does not remove the repo checkout or your MCP client config snippet. Remove t
 
 The installed runtime exposes:
 
-- `broc` to start the MCP server on stdio
-- `broc launch` to launch the managed Chromium browser
+- `broc` to start the MCP server only; browser-backed MCP tasks launch the managed browser on demand
+- `broc launch` to explicitly launch the managed Chromium browser and start the MCP server
+- `broc serve` as the explicit MCP-only entrypoint for integrations
 - `broc status --json` for health checks
-- `broc mcp-config --client=generic|claude-code|codex --copy` to print or copy the MCP config
-- `broc reset` to fully uninstall the staged runtime, managed browser, and managed profile
+- `broc mcp-config --client=generic|claude-code|codex|opencode --copy` to print or copy the MCP config
+- `broc uninstall` to fully uninstall the staged runtime, managed browser, and managed profile
+- `broc reset` as a compatibility alias for `broc uninstall`
 
 ## What The Installer Handles
 
@@ -57,7 +72,9 @@ The installed runtime exposes:
 - managed profile creation
 - profile-local native messaging manifest setup
 - wrapper creation at the staged `broc` path
-- MCP config generation and clipboard copy when supported
+- public `broc` command creation in a user bin directory
+- shell `PATH` setup when needed
+- MCP client detection and config instructions
 
 ## Managed Runtime Layout
 
