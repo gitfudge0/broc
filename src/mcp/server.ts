@@ -37,6 +37,7 @@ import {
 } from "../shared/safety.js";
 import { createNodeLogger } from "../shared/logger.js";
 import { getAppPaths, getRepoPaths } from "../cli/paths.js";
+import { normalizeProfilePath } from "../cli/profile-paths.js";
 import { loadSetupState } from "../cli/state.js";
 import {
   applyBridgePresentation,
@@ -197,7 +198,6 @@ async function isBuildReady(): Promise<boolean> {
   const checks = await Promise.allSettled([
     access(repoPaths.bridgePath),
     access(repoPaths.mcpServerPath),
-    access(`${repoPaths.firefoxExtensionDir}/manifest.json`),
     access(`${repoPaths.chromeExtensionDir}/manifest.json`),
   ]);
   return checks.every((result) => result.status === "fulfilled");
@@ -221,7 +221,10 @@ function phaseForBridgeError(err: unknown): BridgePhase | undefined {
 }
 
 async function collectStatusForError(err?: unknown) {
-  const state = await loadSetupState(appPaths.stateFile);
+  const state = await loadSetupState(appPaths.stateFile, {
+    activeWrapperPath: appPaths.wrapperPath,
+    defaultManagedProfilePath: normalizeProfilePath(appPaths.profilesDir, "chromium"),
+  });
   const report = await collectBrowserStatusReport({
     buildReady: await isBuildReady(),
     setupStatePresent: !!state,
@@ -534,6 +537,65 @@ const server = new McpServer({
   name: "broc",
   version: "0.1.0",
 });
+
+server.registerPrompt("browse_workflow", {
+  title: "Broc Browse Workflow",
+  description: "Built-in browsing guidance for Broc without any external skill file.",
+}, async () => ({
+  messages: [{
+    role: "user",
+    content: {
+      type: "text",
+      text: "Use browser_status first when browser readiness is unclear. Use browser_snapshot to inspect the page, act with the smallest safe step, and re-snapshot after every meaningful change.",
+    },
+  }],
+}));
+
+server.registerPrompt("browser_safety_policy", {
+  title: "Broc Browser Safety Policy",
+  description: "Built-in safety guidance for risky browser actions.",
+}, async () => ({
+  messages: [{
+    role: "user",
+    content: {
+      type: "text",
+      text: "Treat submissions, purchases, deletions, and downloads as high risk. Prefer inspection before action, expect approval requests for risky operations, and verify the resulting page state after approval.",
+    },
+  }],
+}));
+
+server.registerResource("browser-workflow-guide", "broc://guide/browser-workflow", {
+  title: "Broc Browser Workflow Guide",
+  description: "Operational guidance for using Broc browser tools.",
+  mimeType: "text/plain",
+}, async () => ({
+  contents: [{
+    uri: "broc://guide/browser-workflow",
+    text: [
+      "1. Call browser_status if runtime readiness is unclear.",
+      "2. Call browser_snapshot before acting.",
+      "3. Use refs from the latest snapshot for actions.",
+      "4. Re-snapshot after navigation, typing, or clicks that change page state.",
+      "5. Use browser_tabs to recover context if the active tab changes.",
+    ].join("\n"),
+  }],
+}));
+
+server.registerResource("browser-safety-guide", "broc://guide/browser-safety", {
+  title: "Broc Browser Safety Guide",
+  description: "Safety rules for Broc browser automation.",
+  mimeType: "text/plain",
+}, async () => ({
+  contents: [{
+    uri: "broc://guide/browser-safety",
+    text: [
+      "High-risk actions may require approval.",
+      "Sensitive fields are redacted in snapshots and extracts.",
+      "Use the smallest action that advances the task.",
+      "Verify the outcome after every approved or destructive action.",
+    ].join("\n"),
+  }],
+}));
 
 // -- browser_snapshot --
 server.tool(

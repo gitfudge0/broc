@@ -9,7 +9,7 @@ import {
 } from "@puppeteer/browsers";
 import { accessSync, existsSync } from "fs";
 import { mkdir, rm } from "fs/promises";
-import { delimiter, resolve, sep } from "path";
+import { delimiter, resolve } from "path";
 import type { AppPaths } from "./paths.js";
 import type { ManagedChromiumState } from "./state.js";
 
@@ -121,17 +121,4 @@ export function isProfileLocked(profilePath: string): boolean {
     ? ["lock", "parent.lock"]
     : ["parent.lock", ".parentlock"];
   return lockFiles.some((lockFile) => existsSync(resolve(profilePath, lockFile)));
-}
-
-export function profileName(browser: "firefox" | "chrome" | "chromium"): string {
-  return browser;
-}
-
-export function normalizeProfilePath(baseDir: string, browser: "firefox" | "chrome" | "chromium"): string {
-  return resolve(baseDir, browser);
-}
-
-export function isPathInside(parentPath: string, childPath: string): boolean {
-  const normalizedParent = parentPath.endsWith(sep) ? parentPath : parentPath + sep;
-  return childPath.startsWith(normalizedParent);
 }

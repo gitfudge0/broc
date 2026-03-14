@@ -13,7 +13,9 @@
     "dev:launch": "wait-on dist/cli.mjs dist/mcp-server.mjs dist/firefox/manifest.json dist/chrome/manifest.json && nodemon --watch dist/cli.mjs --watch dist/mcp-server.mjs --watch dist/firefox/background.js --watch dist/firefox/content.js --watch dist/firefox/manifest.json --watch dist/chrome/background.js --watch dist/chrome/content.js --watch dist/chrome/manifest.json --ext js,mjs,json --delay 300ms --signal SIGTERM --exec \"npm run launch -- --browser=chrome\"",
     "test": "vitest run",
     "build": "node build.mjs",
+    "build:runtime": "node build.mjs --runtime",
     "clean": "node scripts/clean.mjs",
+    "install:local": "./scripts/install.sh",
     "setup": "node scripts/repo-cli.mjs setup",
     "launch": "node scripts/repo-cli.mjs launch"
   },

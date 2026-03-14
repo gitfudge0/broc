@@ -1,6 +1,6 @@
 # Broc — Documentation
 
-AI agent browser control via native messaging. Supports Firefox, Chrome, and Chromium.
+AI agent browser control via native messaging.
 
 No human-facing UI — this extension exists purely as a programmatic interface for AI agent control via the Model Context Protocol (MCP).
 
@@ -21,79 +21,94 @@ No human-facing UI — this extension exists purely as a programmatic interface 
 
 ### Prerequisites
 
-- **Browser:** Firefox 128+, Google Chrome 130+, or Chromium 130+
+- **OS:** macOS or Linux for the staged-runtime installer flow
 - **Node.js:** 20+
+- **npm:** available on `PATH`
 
 ### Quick Start
 
 ```bash
-# 1. Clone and install
+# 1. Clone the repo
 git clone <repo-url> broc
 cd broc
-npm install
 
-# 2. One-command setup (builds, installs native host, prepares profiles)
-npm run setup -- --browser=firefox
+# 2. Install Broc into the staged home-directory runtime
+./scripts/install.sh
 
-# 3. Launch a managed browser session and start the MCP server
-npm run launch -- --browser=firefox
+# 3. Print or copy the MCP config
+broc mcp-config --copy
 ```
 
-`launch` now guarantees that the requested URL opens in a fresh active tab after the extension bridge connects. If `--url` is omitted, that fresh tab opens `https://www.google.com`. Restored tabs from the managed profile are preserved.
+The installer runs `npm ci`, builds the Chromium-only runtime bundle, stages a stable install under your home directory, installs the production runtime dependencies needed by that staged copy, provisions managed Chromium, prepares the managed profile, installs the profile-local native messaging manifest, and writes the stable `broc` wrapper path used by MCP clients.
 
-If the browser is still running an older extension worker than the current CLI build, launch now warns and falls back to legacy startup-url behavior for that run instead of failing hard. Rebuilding and relaunching refreshes the managed extension worker.
+After install, the MCP client must launch the staged wrapper, not the repo checkout. `broc mcp-config` always emits the correct absolute command path, and the staged runtime does not depend on the source checkout remaining present.
 
-### Build Output
+### Uninstall
 
-The build produces two extension builds and shared Node.js binaries:
+```bash
+./scripts/uninstall.sh
+```
+
+This removes Broc-owned staged/runtime artifacts outside the repo checkout:
+
+- staged installs and the active install marker
+- managed Chromium runtime cache
+- the managed Broc profile
+- the staged wrapper under the Broc data directory
+- Broc state files and best-effort legacy Broc native manifests
+
+It does not remove the repo checkout and it does not edit MCP client configuration automatically. Remove the Broc MCP config snippet manually if you no longer want Broc configured.
+
+### Staged Runtime Layout
+
+- Linux
+  - config: `~/.config/broc`
+  - cache: `~/.cache/broc`
+  - data: `${XDG_DATA_HOME:-~/.local/share}/broc`
+- macOS
+  - config/data: `~/Library/Application Support/broc`
+  - cache: `~/Library/Caches/broc`
+
+Stable wrapper:
+
+- `<dataDir>/bin/broc`
+
+Versioned staged install:
+
+- `<dataDir>/installs/<installVersion>/`
+  - includes `dist/`, `package.json`, `package-lock.json`, and production `node_modules/`
+
+Active install marker:
+
+- `<dataDir>/active-install.json`
+
+### Product Runtime Build Output
+
+`npm run build:runtime` produces the assets staged by the installer:
 
 | Path | Purpose |
 |------|---------|
-| `dist/firefox/background.js` | Firefox background event page |
-| `dist/firefox/content.js` | Firefox content script |
-| `dist/firefox/manifest.json` | Firefox MV3 manifest |
-| `dist/chrome/background.js` | Chrome service worker (includes polyfill) |
-| `dist/chrome/content.js` | Chrome content script (includes polyfill) |
-| `dist/chrome/manifest.json` | Chrome MV3 manifest (with stable key) |
-| `dist/bridge.mjs` | Native messaging bridge host (shared) |
-| `dist/mcp-server.mjs` | MCP server (shared) |
-| `dist/cli.mjs` | CLI entry point (shared) |
+| `dist/chrome/background.js` | Chromium background worker |
+| `dist/chrome/content.js` | Chromium content script |
+| `dist/chrome/manifest.json` | Chromium MV3 manifest |
+| `dist/bridge.mjs` | Native messaging bridge host |
+| `dist/mcp-server.mjs` | MCP server |
+| `dist/cli.mjs` | CLI entry point |
 
 ### Native Messaging Host
 
-The legacy CLI `install` command generates a platform-specific native host manifest with the absolute path to `dist/bridge.mjs` and writes it to the correct directory. The recommended flow is `npm run setup`, which performs build, manifest install, managed profile creation, and managed Chromium provisioning together.
+The staged installer uses the managed Chromium profile-local native messaging manifest and points it at the staged `bridge.mjs`. End users do not need to install a native host manually.
 
-**Firefox manifest** uses `allowed_extensions`:
+**Chromium manifest** uses `allowed_origins`:
 ```json
 {
   "name": "broc",
   "description": "Broc native messaging host for AI agent interaction",
-  "path": "/absolute/path/to/dist/bridge.mjs",
-  "type": "stdio",
-  "allowed_extensions": ["broc@anthropic.ai"]
-}
-```
-
-**Chrome/Chromium manifest** uses `allowed_origins`:
-```json
-{
-  "name": "broc",
-  "description": "Broc native messaging host for AI agent interaction",
-  "path": "/absolute/path/to/dist/bridge.mjs",
+  "path": "/absolute/path/to/<dataDir>/installs/<installVersion>/dist/bridge.mjs",
   "type": "stdio",
   "allowed_origins": ["chrome-extension://jmdfepifjgmfnngjdkceknidfmaeoeie/"]
 }
 ```
-
-#### Manifest Locations
-
-| Browser | Linux | macOS | Windows |
-|---------|-------|-------|---------|
-| Firefox | `~/.mozilla/native-messaging-hosts/` | `~/Library/Application Support/Mozilla/NativeMessagingHosts/` | `%APPDATA%\Mozilla\NativeMessagingHosts\` |
-| Chrome | `~/.config/google-chrome/NativeMessagingHosts/` | `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/` | `%APPDATA%\Google\Chrome\NativeMessagingHosts\` |
-| Chromium | `~/.config/chromium/NativeMessagingHosts/` | `~/Library/Application Support/Chromium/NativeMessagingHosts/` | `%APPDATA%\Chromium\NativeMessagingHosts\` |
-
-On Windows you may also need a registry key (e.g., `HKCU\SOFTWARE\Google\Chrome\NativeMessagingHosts\broc`).
 
 ### Extension Permissions
 
@@ -113,8 +128,7 @@ On Windows you may also need a registry key (e.g., `HKCU\SOFTWARE\Google\Chrome\
 {
   "mcpServers": {
     "broc": {
-      "command": "node",
-      "args": ["/absolute/path/to/broc/dist/cli.mjs"]
+      "command": "/absolute/path/to/<dataDir>/bin/broc"
     }
   }
 }
@@ -125,16 +139,16 @@ On Windows you may also need a registry key (e.g., `HKCU\SOFTWARE\Google\Chrome\
 | Command | Description |
 |---------|-------------|
 | *(none)* | Start the MCP server (default) |
-| `setup` | Build and prepare managed browser setup |
-| `launch` | Launch a browser and start the MCP server |
-| `teardown` | Remove managed setup artifacts |
-| `install` | Legacy: install native messaging host manifest only |
-| `uninstall` | Legacy: remove native messaging host manifest only |
+| `launch` | Launch the managed Chromium browser and start the MCP server |
 | `status` | Show build, setup, and bridge status |
+| `mcp-config` | Print the staged-wrapper MCP config |
+| `reset` | Fully uninstall the staged runtime and managed browser state |
 | `snapshot` | Capture and pretty-print current page |
 | `help` | Show usage information |
 
-**Options:** `--browser=firefox|chrome|chromium` (applies to setup, launch, teardown, install, uninstall, status), `--url=<url>` (open URL in a fresh tab after launch; default `https://www.google.com`), `--no-mcp` (launch browser only), `--json` (machine-readable output for `status` and `snapshot`)
+Legacy compatibility commands still exist for repo/development workflows: `setup`, `teardown`, `install`, `uninstall`. They are repo/dev compatibility paths, not supported staged-runtime targets.
+
+**Options:** `--url=<url>` (open URL in a fresh tab after launch; default `https://www.google.com`), `--no-mcp` (launch browser only), `--json` (machine-readable output for `status` and `snapshot`), `--client=generic|claude-code|codex`, `--copy`
 
 **Snapshot options:** `--verbose` / `-v`, `--json`, `--tab=<id>`
 
@@ -143,6 +157,7 @@ On Windows you may also need a registry key (e.g., `HKCU\SOFTWARE\Google\Chrome\
 - `broc status --json` prints the canonical machine-readable health report for CLI callers.
 - `browser_status` is the MCP-side health tool and returns the same bridge phase data plus a human-readable summary.
 - The MCP server now starts in degraded mode when the bridge is absent. In that state, `browser_status` still works and bridge-backed tools return targeted remediation instead of crashing the process at startup.
+- When Broc is not installed, `status` points back to `./scripts/install.sh`. If Broc was already removed, `./scripts/uninstall.sh` is not needed.
 - Chromium stderr lines such as Wayland image-description warnings or `google_apis ... DEPRECATED_ENDPOINT` are not treated as bridge health failures.
 - If launch reports `Unknown request type: open_tab`, the browser is running a stale extension worker. The launcher now warns and continues, and a fresh `npm run build` + relaunch updates the generated dist manifest version so Chrome-family profiles reload the extension code.
 

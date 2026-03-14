@@ -1,117 +1,83 @@
 # Broc
 
-Broc is a browser extension and MCP bridge for AI-driven browser control across Firefox, Chrome, and Chromium.
+Broc is a repo-installed, staged-runtime browser control package for AI agents.
+
+The install flow builds from this checkout once, stages a stable runtime under your home directory, installs the production runtime dependencies it needs, downloads a managed Chromium, prepares the native messaging bridge, and prints the MCP config you paste into your agent client.
 
 ## Quick Start
 
 ```bash
-npm install
-npm run setup -- --browser=firefox
-npm run launch -- --browser=firefox
+./scripts/install.sh
 ```
 
-`launch` opens the browser with the built extension loaded, starts the MCP server, and opens the requested URL in a fresh tab. When `--url` is omitted, it defaults to `https://www.google.com`.
-
-## npm Scripts
-
-The repo now keeps a small top-level script surface:
-
-| Script | Purpose |
-|--------|---------|
-| `npm run dev` | Watch, launch the browser with the built extension, and start MCP |
-| `npm test` | Run the test suite |
-| `npm run build` | Produce production `dist/` artifacts |
-| `npm run clean` | Remove repo build artifacts only |
-| `npm run setup` | Build and prepare managed browser setup |
-| `npm run launch` | Launch browser + MCP for normal use |
-
-## Script Details
-
-### `npm run dev`
-
-- Defaults to Chrome.
-- Starts `build.mjs --watch`.
-- Launches the browser with the built extension loaded.
-- Starts the MCP server.
-- Restarts the launch session when watched `dist/` outputs change so the new extension code is actually loaded.
-
-Examples:
+After install:
 
 ```bash
-npm run dev
-npm run dev -- --browser=firefox
-npm run dev -- --browser=chromium
+broc mcp-config --copy
 ```
 
-### `npm test`
+Paste the generated config into your MCP client. The staged wrapper path is absolute, self-contained, and does not point at the repo checkout.
 
-Runs `vitest` once.
-
-Use watch mode by passing arguments through npm:
+## Uninstall
 
 ```bash
-npm run test -- --watch
+./scripts/uninstall.sh
 ```
 
-### `npm run build`
+This removes Broc-owned staged/runtime assets outside the repo checkout:
 
-Builds all shared Node binaries plus both extension outputs into `dist/`.
+- staged installs and active install marker
+- managed Chromium runtime cache
+- managed Broc profile
+- stable wrapper under the Broc data directory
+- Broc setup state and best-effort legacy native manifests
 
-### `npm run clean`
+It does not remove the repo checkout or your MCP client config snippet. Remove the client config manually if you no longer want Broc configured.
 
-Default behavior:
+## User-Facing Commands
 
-- removes `dist/`
-- keeps managed browser profiles, managed Chromium runtime, and setup state intact
+The installed runtime exposes:
 
-Full cleanup:
+- `broc` to start the MCP server on stdio
+- `broc launch` to launch the managed Chromium browser
+- `broc status --json` for health checks
+- `broc mcp-config --client=generic|claude-code|codex --copy` to print or copy the MCP config
+- `broc reset` to fully uninstall the staged runtime, managed browser, and managed profile
 
-```bash
-npm run clean -- --all
-```
+## What The Installer Handles
 
-`--all` performs best-effort managed cleanup through the CLI first, then removes repo artifacts.
+`./scripts/install.sh` performs:
 
-### `npm run setup`
+- Node/npm prerequisite checks
+- `npm ci`
+- `npm run build:runtime`
+- staging `dist/` into a stable home-directory install root
+- staging `package.json`, `package-lock.json`, and production `node_modules/`
+- managed Chromium download
+- managed profile creation
+- profile-local native messaging manifest setup
+- wrapper creation at the staged `broc` path
+- MCP config generation and clipboard copy when supported
 
-Primary install/setup path for users. It builds the repo, installs native messaging manifests, prepares managed profiles, and provisions the managed Chromium runtime when needed.
+## Managed Runtime Layout
 
-Examples:
+- Linux config: `~/.config/broc`
+- Linux cache: `~/.cache/broc`
+- Linux data: `${XDG_DATA_HOME:-~/.local/share}/broc`
+- macOS config/data: `~/Library/Application Support/broc`
+- macOS cache: `~/Library/Caches/broc`
 
-```bash
-npm run setup -- --browser=firefox
-npm run setup -- --browser=chrome
-```
+The stable wrapper lives at `<dataDir>/bin/broc`.
 
-### `npm run launch`
+## Development
 
-Primary runtime path for users. It launches the selected browser, waits for the bridge, opens the requested URL in a fresh tab, and starts MCP.
+The staged runtime is the supported end-user path. Firefox/Chrome repo flows remain available for repo/dev compatibility only:
 
-Examples:
+- `npm run dev`
+- `npm test`
+- `npm run build`
+- `npm run build:runtime`
+- `npm run setup -- --browser=firefox|chrome|chromium`
+- `npm run launch -- --browser=firefox|chrome|chromium`
 
-```bash
-npm run launch -- --browser=firefox
-npm run launch -- --browser=chrome --url=https://example.com
-npm run launch -- --browser=chromium --no-mcp
-```
-
-If the browser is running a stale extension worker, launch warns and falls back for that run instead of failing hard.
-
-## Advanced Commands
-
-These are still supported directly, but not exposed as top-level npm scripts:
-
-```bash
-node dist/cli.mjs status
-node dist/cli.mjs teardown
-node dist/cli.mjs uninstall --browser=chrome
-npx tsc --noEmit
-npx web-ext lint --source-dir dist/firefox
-```
-
-## Notes
-
-- `npm run dev` defaults to Chrome.
-- `npm run clean` is safe by default; use `--all` only when you want to remove managed state too.
-- `setup` and `launch` remain npm scripts because they are the primary user-facing entry points.
-- More detailed architecture and protocol docs live in [DOCS.md](./DOCS.md).
+Architecture details and protocol internals are in [DOCS.md](./DOCS.md).

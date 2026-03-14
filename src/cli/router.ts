@@ -5,6 +5,9 @@ export interface CliCommandHandlers {
   install: () => Promise<void>;
   uninstall: () => Promise<void>;
   status: () => Promise<void>;
+  mcpConfig: () => Promise<void>;
+  reset: () => Promise<void>;
+  stageInstall: () => Promise<void>;
   snapshot: () => Promise<void>;
   help: () => Promise<void> | void;
   start: () => Promise<void>;
@@ -33,6 +36,15 @@ export async function routeCliCommand(
       return;
     case "status":
       await handlers.status();
+      return;
+    case "mcp-config":
+      await handlers.mcpConfig();
+      return;
+    case "reset":
+      await handlers.reset();
+      return;
+    case "stage-install":
+      await handlers.stageInstall();
       return;
     case "snapshot":
       await handlers.snapshot();

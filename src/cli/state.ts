@@ -2,7 +2,10 @@ import { mkdir, readFile, rm, writeFile } from "fs/promises";
 import { dirname } from "path";
 import type { BrowserType } from "./types.js";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
+const LEGACY_SCHEMA_VERSION = 1;
+
+export type BrowserManifestMode = "global" | "profile" | "both";
 
 export interface ManagedChromiumState {
   browser: "chromium";
@@ -19,9 +22,49 @@ export interface BrowserSetupState {
   executablePath: string;
   preparedAt: string;
   nativeManifestBrowsers: BrowserType[];
+  manifestMode: BrowserManifestMode;
 }
 
 export interface SetupState {
+  schemaVersion: number;
+  installVersion: string;
+  installRoot: string;
+  activeWrapperPath: string;
+  managedProfilePath: string;
+  updatedAt: string;
+  dist: {
+    root: string;
+    bridgePath: string;
+    mcpServerPath: string;
+    chromeExtensionDir: string;
+  };
+  nativeManifestOwners: Partial<Record<BrowserType, BrowserType[]>>;
+  browsers: Partial<Record<BrowserType, BrowserSetupState>>;
+  managedChromium?: ManagedChromiumState;
+  migratedFromLegacy?: boolean;
+}
+
+export interface RepoStateShape {
+  installVersion: string;
+  installRoot: string;
+  activeWrapperPath: string;
+  managedProfilePath: string;
+  distDir: string;
+  bridgePath: string;
+  mcpServerPath: string;
+  chromeExtensionDir: string;
+}
+
+interface LegacyBrowserSetupState {
+  browser: BrowserType;
+  profilePath: string;
+  runtime: "system-firefox" | "managed-chromium";
+  executablePath: string;
+  preparedAt: string;
+  nativeManifestBrowsers: BrowserType[];
+}
+
+interface LegacySetupState {
   schemaVersion: number;
   repoRoot: string;
   updatedAt: string;
@@ -29,21 +72,17 @@ export interface SetupState {
     root: string;
     bridgePath: string;
     mcpServerPath: string;
-    firefoxExtensionDir: string;
+    firefoxExtensionDir?: string;
     chromeExtensionDir: string;
   };
   nativeManifestOwners: Partial<Record<BrowserType, BrowserType[]>>;
-  browsers: Partial<Record<BrowserType, BrowserSetupState>>;
+  browsers: Partial<Record<BrowserType, LegacyBrowserSetupState>>;
   managedChromium?: ManagedChromiumState;
 }
 
-export interface RepoStateShape {
-  repoRoot: string;
-  distDir: string;
-  bridgePath: string;
-  mcpServerPath: string;
-  firefoxExtensionDir: string;
-  chromeExtensionDir: string;
+export interface LoadSetupStateOptions {
+  activeWrapperPath: string;
+  defaultManagedProfilePath: string;
 }
 
 function isStringRecord(value: unknown): value is Record<string, unknown> {
@@ -58,6 +97,17 @@ function isBrowserOwnerMap(value: unknown): value is Partial<Record<BrowserType,
 }
 
 function isBrowserSetupState(value: unknown): value is BrowserSetupState {
+  if (!isStringRecord(value)) return false;
+  return typeof value.browser === "string" &&
+    typeof value.profilePath === "string" &&
+    typeof value.runtime === "string" &&
+    typeof value.executablePath === "string" &&
+    typeof value.preparedAt === "string" &&
+    Array.isArray(value.nativeManifestBrowsers) &&
+    isBrowserManifestMode(value.manifestMode);
+}
+
+function isLegacyBrowserSetupState(value: unknown): value is LegacyBrowserSetupState {
   if (!isStringRecord(value)) return false;
   return typeof value.browser === "string" &&
     typeof value.profilePath === "string" &&
@@ -79,8 +129,20 @@ function isManagedChromiumState(value: unknown): value is ManagedChromiumState {
 export function isSetupState(value: unknown): value is SetupState {
   if (!isStringRecord(value)) return false;
   if (value.schemaVersion !== SCHEMA_VERSION) return false;
-  if (typeof value.repoRoot !== "string" || typeof value.updatedAt !== "string") return false;
+  if (
+    typeof value.installVersion !== "string" ||
+    typeof value.installRoot !== "string" ||
+    typeof value.activeWrapperPath !== "string" ||
+    typeof value.managedProfilePath !== "string" ||
+    typeof value.updatedAt !== "string"
+  ) {
+    return false;
+  }
   if (!isStringRecord(value.dist)) return false;
+  if (typeof value.dist.root !== "string") return false;
+  if (typeof value.dist.bridgePath !== "string") return false;
+  if (typeof value.dist.mcpServerPath !== "string") return false;
+  if (typeof value.dist.chromeExtensionDir !== "string") return false;
   if (!isBrowserOwnerMap(value.nativeManifestOwners)) return false;
   if (!isStringRecord(value.browsers)) return false;
   if (!Object.values(value.browsers).every((entry) => entry === undefined || isBrowserSetupState(entry))) return false;
@@ -88,16 +150,85 @@ export function isSetupState(value: unknown): value is SetupState {
   return true;
 }
 
+function isLegacySetupState(value: unknown): value is LegacySetupState {
+  if (!isStringRecord(value)) return false;
+  if (value.schemaVersion !== LEGACY_SCHEMA_VERSION) return false;
+  if (typeof value.repoRoot !== "string" || typeof value.updatedAt !== "string") return false;
+  if (!isStringRecord(value.dist)) return false;
+  if (typeof value.dist.root !== "string") return false;
+  if (typeof value.dist.bridgePath !== "string") return false;
+  if (typeof value.dist.mcpServerPath !== "string") return false;
+  if (typeof value.dist.chromeExtensionDir !== "string") return false;
+  if (!isBrowserOwnerMap(value.nativeManifestOwners)) return false;
+  if (!isStringRecord(value.browsers)) return false;
+  if (!Object.values(value.browsers).every((entry) => entry === undefined || isLegacyBrowserSetupState(entry))) return false;
+  if (value.managedChromium !== undefined && !isManagedChromiumState(value.managedChromium)) return false;
+  return true;
+}
+
+function isBrowserManifestMode(value: unknown): value is BrowserManifestMode {
+  return value === "global" || value === "profile" || value === "both";
+}
+
+function inferLegacyManifestMode(browser: BrowserType): BrowserManifestMode {
+  return browser === "firefox" ? "global" : "both";
+}
+
+function selectManagedProfilePath(
+  legacyState: LegacySetupState,
+  defaultManagedProfilePath: string,
+): string {
+  return legacyState.browsers.chromium?.profilePath
+    || legacyState.browsers.chrome?.profilePath
+    || defaultManagedProfilePath;
+}
+
+function migrateLegacySetupState(
+  legacyState: LegacySetupState,
+  options: LoadSetupStateOptions,
+): SetupState {
+  const migratedBrowsers = Object.fromEntries(
+    Object.entries(legacyState.browsers).flatMap(([browser, value]) => {
+      if (!value) return [];
+      return [[browser, {
+        ...value,
+        manifestMode: inferLegacyManifestMode(value.browser),
+      } satisfies BrowserSetupState]];
+    }),
+  ) as Partial<Record<BrowserType, BrowserSetupState>>;
+
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    installVersion: "repo-dev",
+    installRoot: legacyState.repoRoot,
+    activeWrapperPath: options.activeWrapperPath,
+    managedProfilePath: selectManagedProfilePath(legacyState, options.defaultManagedProfilePath),
+    updatedAt: legacyState.updatedAt,
+    dist: {
+      root: legacyState.dist.root,
+      bridgePath: legacyState.dist.bridgePath,
+      mcpServerPath: legacyState.dist.mcpServerPath,
+      chromeExtensionDir: legacyState.dist.chromeExtensionDir,
+    },
+    nativeManifestOwners: legacyState.nativeManifestOwners,
+    browsers: migratedBrowsers,
+    managedChromium: legacyState.managedChromium,
+    migratedFromLegacy: true,
+  };
+}
+
 export function createEmptySetupState(shape: RepoStateShape): SetupState {
   return {
     schemaVersion: SCHEMA_VERSION,
-    repoRoot: shape.repoRoot,
+    installVersion: shape.installVersion,
+    installRoot: shape.installRoot,
+    activeWrapperPath: shape.activeWrapperPath,
+    managedProfilePath: shape.managedProfilePath,
     updatedAt: new Date().toISOString(),
     dist: {
       root: shape.distDir,
       bridgePath: shape.bridgePath,
       mcpServerPath: shape.mcpServerPath,
-      firefoxExtensionDir: shape.firefoxExtensionDir,
       chromeExtensionDir: shape.chromeExtensionDir,
     },
     nativeManifestOwners: {},
@@ -105,11 +236,20 @@ export function createEmptySetupState(shape: RepoStateShape): SetupState {
   };
 }
 
-export async function loadSetupState(stateFile: string): Promise<SetupState | null> {
+export async function loadSetupState(
+  stateFile: string,
+  options?: LoadSetupStateOptions,
+): Promise<SetupState | null> {
   try {
     const content = await readFile(stateFile, "utf-8");
     const parsed = JSON.parse(content) as unknown;
-    return isSetupState(parsed) ? parsed : null;
+    if (isSetupState(parsed)) {
+      return parsed;
+    }
+    if (options && isLegacySetupState(parsed)) {
+      return migrateLegacySetupState(parsed, options);
+    }
+    return null;
   } catch {
     return null;
   }

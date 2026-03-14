@@ -1,4 +1,11 @@
-import { VALID_BROWSERS, isBrowserType, type BrowserType } from "./types.js";
+import {
+  VALID_BROWSERS,
+  VALID_MCP_CLIENTS,
+  isBrowserType,
+  isMcpClientType,
+  type BrowserType,
+  type McpClientType,
+} from "./types.js";
 
 export function parseNoMcpFlag(argv: string[]): boolean {
   return argv.includes("--no-mcp");
@@ -6,6 +13,35 @@ export function parseNoMcpFlag(argv: string[]): boolean {
 
 export function parseJsonFlag(argv: string[]): boolean {
   return argv.includes("--json");
+}
+
+export function parseCopyFlag(argv: string[]): boolean {
+  return argv.includes("--copy");
+}
+
+export function parseClientFlag(
+  argv: string[],
+  {
+    logError = console.error,
+    exit = process.exit,
+  }: {
+    logError?: (message: string) => void;
+    exit?: (code?: number) => never;
+  } = {},
+): McpClientType {
+  const clientArg = argv.filter((arg) => arg.startsWith("--client=")).at(-1);
+  if (!clientArg) {
+    return "generic";
+  }
+
+  const value = clientArg.slice("--client=".length).toLowerCase();
+  if (isMcpClientType(value)) {
+    return value;
+  }
+
+  logError(`Invalid client: ${value}. Must be one of: ${VALID_MCP_CLIENTS.join(", ")}`);
+  exit(1);
+  throw new Error("Unreachable");
 }
 
 export function parseBrowserFlag(

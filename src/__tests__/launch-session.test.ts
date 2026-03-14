@@ -208,7 +208,8 @@ describe("orchestrateLaunchSession", () => {
       throw new Error("Expected launch session to register signal handlers.");
     }
 
-    await onSignal("SIGTERM");
+    const signalHandler = onSignal as (signal: NodeJS.Signals) => void | Promise<void>;
+    await signalHandler("SIGTERM");
     await promise;
 
     expect(terminateChildren).toHaveBeenCalledWith([mcp, browser], { signal: "SIGTERM" });

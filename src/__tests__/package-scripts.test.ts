@@ -9,7 +9,9 @@ describe("package.json scripts", () => {
       "dev:launch",
       "test",
       "build",
+      "build:runtime",
       "clean",
+      "install:local",
       "setup",
       "launch",
     ]);

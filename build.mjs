@@ -3,6 +3,7 @@ import { cp, mkdir, chmod, readFile, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 
 const watch = process.argv.includes("--watch");
+const runtimeOnly = process.argv.includes("--runtime");
 const EXTENSION_BUILD_STATE_PATH = "dist/.extension-build.json";
 
 // ---- Browser-specific extension configs ----
@@ -36,6 +37,9 @@ const sharedNode = {
   platform: "node",
   logLevel: "info",
 };
+
+const mcpServerExternals = ["@modelcontextprotocol/sdk/*", "zod", "@puppeteer/browsers"];
+const cliExternals = ["@puppeteer/browsers"];
 
 // ---- Static file copying ----
 
@@ -89,10 +93,12 @@ async function writeGeneratedManifests() {
   chromeManifest.version = generatedVersion;
   chromeManifest.version_name = pkg.version;
 
-  await ensureDir("dist/firefox");
   await ensureDir("dist/chrome");
-  await writeFile("dist/firefox/manifest.json", JSON.stringify(firefoxManifest, null, 2) + "\n");
   await writeFile("dist/chrome/manifest.json", JSON.stringify(chromeManifest, null, 2) + "\n");
+  if (!runtimeOnly) {
+    await ensureDir("dist/firefox");
+    await writeFile("dist/firefox/manifest.json", JSON.stringify(firefoxManifest, null, 2) + "\n");
+  }
 }
 
 /**
@@ -162,7 +168,7 @@ async function buildNode() {
     entryPoints: ["src/mcp/server.ts"],
     outfile: "dist/mcp-server.mjs",
     banner: { js: "#!/usr/bin/env node" },
-    external: ["@modelcontextprotocol/sdk/*", "zod"],
+    external: mcpServerExternals,
   });
 
   const cli = esbuild.build({
@@ -170,7 +176,7 @@ async function buildNode() {
     entryPoints: ["src/cli.ts"],
     outfile: "dist/cli.mjs",
     banner: { js: "#!/usr/bin/env node" },
-    external: ["@puppeteer/browsers"],
+    external: cliExternals,
   });
 
   await Promise.all([bridge, mcpServer, cli]);
@@ -227,14 +233,14 @@ if (watch) {
     entryPoints: ["src/mcp/server.ts"],
     outfile: "dist/mcp-server.mjs",
     banner: { js: "#!/usr/bin/env node" },
-    external: ["@modelcontextprotocol/sdk/*", "zod"],
+    external: mcpServerExternals,
   });
   const cliCtx = await esbuild.context({
     ...sharedNode,
     entryPoints: ["src/cli.ts"],
     outfile: "dist/cli.mjs",
     banner: { js: "#!/usr/bin/env node" },
-    external: ["@puppeteer/browsers"],
+    external: cliExternals,
   });
 
   await copyStatic();
@@ -252,7 +258,7 @@ if (watch) {
   await copyStatic();
 
   // Build extension for both browsers in parallel
-  const firefoxBuild = buildExtension("firefox", firefoxExtension);
+  const firefoxBuild = runtimeOnly ? Promise.resolve() : buildExtension("firefox", firefoxExtension);
   const chromeBuild = buildExtension("chrome", chromeExtension, chromeBanner);
   const nodeBuild = buildNode();
 
