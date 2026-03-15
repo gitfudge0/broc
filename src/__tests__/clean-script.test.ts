@@ -26,7 +26,7 @@ describe("runClean", () => {
     expect(removeDir).toHaveBeenCalledOnce();
   });
 
-  it("runs teardown and uninstall best-effort for --all", async () => {
+  it("runs teardown and uninstall-native-host best-effort for --all", async () => {
     const runNode = vi.fn<(args: string[]) => Promise<void>>(async () => {});
     const removeDir = vi.fn(async () => {});
 
@@ -40,7 +40,7 @@ describe("runClean", () => {
     const teardownArgs = runNode.mock.calls[0]?.[0] as string[] | undefined;
     const uninstallArgs = runNode.mock.calls[1]?.[0] as string[] | undefined;
     expect(teardownArgs?.at(-1)).toBe("teardown");
-    expect(uninstallArgs?.at(-1)).toBe("uninstall");
+    expect(uninstallArgs?.at(-1)).toBe("uninstall-native-host");
     expect(removeDir).toHaveBeenCalledOnce();
   });
 

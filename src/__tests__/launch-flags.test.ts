@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseBrowserFlag, parseJsonFlag, parseNoMcpFlag } from "../cli/flags.js";
+import { parseBrowserFlag, parseClientFlag, parseCopyFlag, parseJsonFlag, parseNoMcpFlag } from "../cli/flags.js";
 
 describe("parseNoMcpFlag", () => {
   it("defaults to starting the MCP server", () => {
@@ -18,6 +18,26 @@ describe("parseJsonFlag", () => {
 
   it("enables JSON output when --json is present", () => {
     expect(parseJsonFlag(["status", "--json"])).toBe(true);
+  });
+});
+
+describe("parseCopyFlag", () => {
+  it("detects --copy", () => {
+    expect(parseCopyFlag(["mcp-config", "--copy"])).toBe(true);
+  });
+});
+
+describe("parseClientFlag", () => {
+  it("defaults to generic", () => {
+    expect(parseClientFlag(["mcp-config"])).toBe("generic");
+  });
+
+  it("parses a supported client", () => {
+    expect(parseClientFlag(["mcp-config", "--client=codex"])).toBe("codex");
+  });
+
+  it("parses opencode as a supported client", () => {
+    expect(parseClientFlag(["mcp-config", "--client=opencode"])).toBe("opencode");
   });
 });
 

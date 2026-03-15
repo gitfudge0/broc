@@ -6,6 +6,8 @@ describe("getAppPathsFor", () => {
     const paths = getAppPathsFor("linux", {}, "/home/tester");
     expect(paths.configDir).toBe("/home/tester/.config/broc");
     expect(paths.cacheDir).toBe("/home/tester/.cache/broc");
+    expect(paths.dataDir).toBe("/home/tester/.local/share/broc");
+    expect(paths.wrapperPath).toBe("/home/tester/.local/share/broc/bin/broc");
     expect(paths.stateFile).toBe("/home/tester/.config/broc/setup-state.json");
   });
 
@@ -13,6 +15,7 @@ describe("getAppPathsFor", () => {
     const paths = getAppPathsFor("darwin", {}, "/Users/tester");
     expect(paths.configDir).toBe("/Users/tester/Library/Application Support/broc");
     expect(paths.cacheDir).toBe("/Users/tester/Library/Caches/broc");
+    expect(paths.wrapperPath).toBe("/Users/tester/Library/Application Support/broc/bin/broc");
   });
 
   it("returns Windows config and cache paths", () => {

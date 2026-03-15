@@ -67,7 +67,7 @@ export function getNativeManifestPath(browserType: BrowserType): string {
 }
 
 export function getProfileNativeManifestDir(profilePath: string): string {
-  return resolve(profilePath, "Default", "NativeMessagingHosts");
+  return resolve(profilePath, "NativeMessagingHosts");
 }
 
 export function getProfileNativeManifestPath(profilePath: string): string {

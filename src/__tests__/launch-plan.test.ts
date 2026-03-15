@@ -42,6 +42,7 @@ describe("launch plan builders", () => {
       executablePath: "/usr/bin/firefox",
       preparedAt: new Date().toISOString(),
       nativeManifestBrowsers: ["firefox"],
+      manifestMode: "global",
     };
 
     const plan = await buildFirefoxLaunchPlan(repoPaths, browserState, "https://example.com");
@@ -74,6 +75,7 @@ describe("launch plan builders", () => {
       executablePath: "/usr/bin/firefox",
       preparedAt: new Date().toISOString(),
       nativeManifestBrowsers: ["firefox"],
+      manifestMode: "global",
     };
 
     const plan = await buildFirefoxLaunchPlan(repoPaths, browserState);
@@ -99,6 +101,7 @@ describe("launch plan builders", () => {
       executablePath: "/cache/chromium/chrome",
       preparedAt: new Date().toISOString(),
       nativeManifestBrowsers: ["chromium"],
+      manifestMode: "both",
     };
     const runtime: ManagedChromiumState = {
       browser: "chromium",
@@ -134,6 +137,7 @@ describe("launch plan builders", () => {
       executablePath: "/cache/chromium/chrome",
       preparedAt: new Date().toISOString(),
       nativeManifestBrowsers: ["chromium"],
+      manifestMode: "both",
     };
     const runtime: ManagedChromiumState = {
       browser: "chromium",

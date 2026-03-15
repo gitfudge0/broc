@@ -1,8 +1,9 @@
 import { spawn, type ChildProcess } from "child_process";
-import { access, mkdir, rm } from "fs/promises";
+import { access, rm } from "fs/promises";
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 import { BridgeClient, getPidPath, getSocketPath, isBridgeRunning } from "./mcp/bridge-client.js";
+import { resolveCliCommand, stripResolvedCommand } from "./cli/command.js";
 import {
   buildChromiumLaunchPlan,
   buildFirefoxLaunchPlan,
@@ -23,6 +24,17 @@ import {
 } from "./cli/native-host.js";
 import { getAppPaths, getRepoPaths } from "./cli/paths.js";
 import {
+  buildMcpConfig,
+  canCopyTextToClipboard,
+  copyTextToClipboard,
+  ensureAppDirs,
+  installFromRepoBuild,
+  resetInstalledRuntime,
+} from "./cli/bootstrap.js";
+import { detectInstalledClients } from "./cli/client-detect.js";
+import { normalizeProfilePath } from "./cli/profile-paths.js";
+import { renderInstallSummary } from "./cli/install-summary.js";
+import {
   createEmptySetupState,
   deleteSetupState,
   hasPreparedBrowsers,
@@ -34,14 +46,14 @@ import {
   ensureManagedChromium,
   ensureProfileDir,
   isProfileLocked,
-  normalizeProfilePath,
   removeManagedChromium,
   resolveFirefoxExecutable,
 } from "./cli/runtime.js";
 import { routeCliCommand } from "./cli/router.js";
 import { snapshotCommand } from "./cli/snapshot.js";
-import { VALID_BROWSERS, type BrowserType } from "./cli/types.js";
-import { parseBrowserFlag, parseJsonFlag, parseNoMcpFlag } from "./cli/flags.js";
+import { evaluateBrowserReadiness } from "./cli/status.js";
+import { VALID_BROWSERS, isBrowserType, type BrowserType } from "./cli/types.js";
+import { parseBrowserFlag, parseClientFlag, parseCopyFlag, parseJsonFlag, parseNoMcpFlag } from "./cli/flags.js";
 import { orchestrateLaunchSession } from "./cli/session.js";
 import { buildHelpText } from "./cli/help.js";
 import { collectBrowserStatusReport } from "./shared/bridge-status.js";
@@ -50,6 +62,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repoPaths = getRepoPaths(__dirname);
 const appPaths = getAppPaths();
+
+function getLoadStateOptions() {
+  return {
+    activeWrapperPath: appPaths.wrapperPath,
+    defaultManagedProfilePath: normalizeProfilePath(appPaths.profilesDir, "chromium"),
+  };
+}
 
 function parseUrlFlag(argv: string[]): string | undefined {
   const urlArg = argv.find((arg) => arg.startsWith("--url="));
@@ -86,8 +105,8 @@ function targetBrowsers(browserFlag: BrowserType | undefined): BrowserType[] {
   return browserFlag ? [browserFlag] : [...VALID_BROWSERS];
 }
 
-async function ensureDistReady(): Promise<void> {
-  const required = buildArtifactPaths();
+async function ensureDistReady(options: { includeFirefox?: boolean } = {}): Promise<void> {
+  const required = buildArtifactPaths(options);
 
   for (const path of required) {
     try {
@@ -100,38 +119,36 @@ async function ensureDistReady(): Promise<void> {
   }
 }
 
-function buildArtifactPaths(): string[] {
-  return [
+function buildArtifactPaths(options: { includeFirefox?: boolean } = {}): string[] {
+  const required = [
     repoPaths.bridgePath,
     repoPaths.mcpServerPath,
-    resolve(repoPaths.firefoxExtensionDir, "manifest.json"),
     resolve(repoPaths.chromeExtensionDir, "manifest.json"),
   ];
-}
 
-async function ensureAppDirs(): Promise<void> {
-  await Promise.all([
-    mkdir(appPaths.configDir, { recursive: true }),
-    mkdir(appPaths.cacheDir, { recursive: true }),
-    mkdir(appPaths.profilesDir, { recursive: true }),
-    mkdir(appPaths.runtimesDir, { recursive: true }),
-  ]);
+  if (options.includeFirefox) {
+    required.push(resolve(repoPaths.firefoxExtensionDir, "manifest.json"));
+  }
+
+  return required;
 }
 
 async function loadRepoSetupState(): Promise<SetupState | null> {
-  const state = await loadSetupState(appPaths.stateFile);
+  const state = await loadSetupState(appPaths.stateFile, getLoadStateOptions());
   if (!state) return null;
-  if (state.repoRoot !== repoPaths.repoRoot) return null;
+  if (state.installRoot !== repoPaths.repoRoot && state.dist.root !== repoPaths.distDir) return null;
   return state;
 }
 
 function getOrCreateState(existing: SetupState | null): SetupState {
   return existing ?? createEmptySetupState({
-    repoRoot: repoPaths.repoRoot,
+    installVersion: "repo-dev",
+    installRoot: repoPaths.repoRoot,
+    activeWrapperPath: appPaths.wrapperPath,
+    managedProfilePath: normalizeProfilePath(appPaths.profilesDir, "chromium"),
     distDir: repoPaths.distDir,
     bridgePath: repoPaths.bridgePath,
     mcpServerPath: repoPaths.mcpServerPath,
-    firefoxExtensionDir: repoPaths.firefoxExtensionDir,
     chromeExtensionDir: repoPaths.chromeExtensionDir,
   });
 }
@@ -165,8 +182,8 @@ function requireBrowserFlag(browserFlag: BrowserType | undefined, commandName: s
 }
 
 async function setupCommand(browsers: BrowserType[]): Promise<void> {
-  await ensureDistReady();
-  await ensureAppDirs();
+  await ensureDistReady({ includeFirefox: browsers.includes("firefox") });
+  await ensureAppDirs(appPaths);
 
   const state = getOrCreateState(await loadRepoSetupState());
   const needsManagedChromium = browsers.some((browser) => browser === "chrome" || browser === "chromium");
@@ -197,6 +214,7 @@ async function setupCommand(browsers: BrowserType[]): Promise<void> {
         executablePath,
         preparedAt: new Date().toISOString(),
         nativeManifestBrowsers,
+        manifestMode: "global",
       };
       continue;
     }
@@ -208,6 +226,7 @@ async function setupCommand(browsers: BrowserType[]): Promise<void> {
     const profilePath = normalizeProfilePath(appPaths.profilesDir, browser as "chrome" | "chromium");
     await ensureProfileDir(profilePath);
     await installProfileNativeManifest(profilePath, repoPaths.bridgePath);
+    state.managedProfilePath = profilePath;
     state.browsers[browser] = {
       browser,
       profilePath,
@@ -215,6 +234,7 @@ async function setupCommand(browsers: BrowserType[]): Promise<void> {
       executablePath: state.managedChromium.executablePath,
       preparedAt: new Date().toISOString(),
       nativeManifestBrowsers,
+      manifestMode: "both",
     };
   }
 
@@ -380,11 +400,11 @@ async function launchCommand(
 ): Promise<void> {
   const startMcp = options.startMcp ?? true;
   const launchUrl = resolveLaunchUrl(url);
-  await ensureDistReady();
+  await ensureDistReady({ includeFirefox: browser === "firefox" });
   const state = await loadRepoSetupState();
   if (!state || !state.browsers[browser]) {
     console.error(`Error: ${browser} is not set up.`);
-    console.error(`Run 'npm run setup -- --browser=${browser}' first.`);
+    console.error("Run './scripts/install.sh' or 'broc setup' first.");
     process.exit(1);
   }
 
@@ -403,7 +423,7 @@ async function launchCommand(
   } else {
     if (!state.managedChromium) {
       console.error("Error: Managed Chromium runtime is not available.");
-      console.error(`Run 'npm run setup -- --browser=${browser}' first.`);
+      console.error("Run './scripts/install.sh' or 'broc setup' first.");
       process.exit(1);
     }
 
@@ -484,7 +504,7 @@ async function installCommand(browsers: BrowserType[]): Promise<void> {
   console.log("Use 'broc setup' for the full guided flow.");
 }
 
-async function uninstallCommand(browsers: BrowserType[]): Promise<void> {
+async function uninstallNativeHostCommand(browsers: BrowserType[]): Promise<void> {
   for (const browser of browsers) {
     const removed = await removeNativeManifest(browser);
     console.log(`[${browser}] ${removed ? "Removed" : "Not installed"}: ${getNativeManifestPath(browser)}`);
@@ -507,16 +527,21 @@ async function statusCommand(browsers: BrowserType[], options: { json?: boolean 
   console.log("");
   console.log(`Build artifacts: ${buildReady ? "Ready" : "Missing"}`);
   console.log(`Setup state: ${state ? "Present" : "Not set up"}`);
+  if (state) {
+    console.log(`Install root: ${state.installRoot}`);
+    console.log(`Wrapper: ${state.activeWrapperPath}`);
+  }
 
   for (const browser of browsers) {
     const browserState = state?.browsers[browser];
     const manifestBrowsers = browserState?.nativeManifestBrowsers ?? getNativeManifestDependencies(browser);
-    const manifestStatuses = await Promise.all(
-      manifestBrowsers.map(async (manifestBrowser) => ({
-        browser: manifestBrowser,
-        manifest: await readInstalledNativeManifest(manifestBrowser),
-      })),
+    const manifestPresenceEntries = await Promise.all(
+      manifestBrowsers.map(async (manifestBrowser) => ([
+        manifestBrowser,
+        !!await readInstalledNativeManifest(manifestBrowser),
+      ] as const)),
     );
+    const manifestPresence = Object.fromEntries(manifestPresenceEntries) as Partial<Record<BrowserType, boolean>>;
     const profileManifest = browserState && browser !== "firefox"
       ? await readProfileNativeManifest(browserState.profilePath)
       : null;
@@ -526,6 +551,15 @@ async function statusCommand(browsers: BrowserType[], options: { json?: boolean 
     const executableReady = browserState
       ? await access(browserState.executablePath).then(() => true).catch(() => false)
       : false;
+    const readiness = evaluateBrowserReadiness({
+      browser,
+      browserState,
+      buildReady,
+      profileReady,
+      executableReady,
+      profileManifestPresent: !!profileManifest,
+      installedManifestPresence: manifestPresence,
+    });
 
     console.log("");
     console.log(`[${browser}]`);
@@ -534,18 +568,17 @@ async function statusCommand(browsers: BrowserType[], options: { json?: boolean 
     console.log(`  Executable: ${executableReady ? browserState?.executablePath : "Missing"}`);
     console.log(`  Runtime: ${browser === "firefox" ? "system-firefox" : state?.managedChromium ? "managed-chromium" : "Missing"}`);
     if (browser !== "firefox") {
-      console.log(`  Native manifest (profile-local): ${profileManifest ? getProfileNativeManifestPath(browserState!.profilePath) : "Missing"}`);
+      const profileLabel = profileManifest
+        ? getProfileNativeManifestPath(browserState!.profilePath)
+        : "Missing";
+      const profileSuffix = readiness.profileManifestRequired ? "" : " (optional)";
+      console.log(`  Native manifest (profile-local): ${profileLabel}${profileSuffix}`);
     }
-    for (const manifestStatus of manifestStatuses) {
-      console.log(`  Native manifest (${manifestStatus.browser}): ${manifestStatus.manifest ? "Installed" : "Missing"}`);
+    for (const manifestStatus of readiness.globalManifests) {
+      const suffix = manifestStatus.required ? "" : " (optional)";
+      console.log(`  Native manifest (${manifestStatus.browser}): ${manifestStatus.present ? "Installed" : "Missing"}${suffix}`);
     }
-    const launchReady = buildReady &&
-      !!browserState &&
-      profileReady &&
-      executableReady &&
-      manifestStatuses.every((entry) => !!entry.manifest) &&
-      (browser === "firefox" || !!profileManifest);
-    console.log(`  Launch ready: ${launchReady ? "Yes" : "No"}`);
+    console.log(`  Launch ready: ${readiness.launchReady ? "Yes" : "No"}`);
   }
 
   console.log("");
@@ -571,8 +604,54 @@ async function statusCommand(browsers: BrowserType[], options: { json?: boolean 
     }
   }
   if (!state) {
-    console.log("Run 'npm run setup -- --browser=<name>' to prepare a browser.");
+    console.log("Run './scripts/install.sh' to prepare the managed runtime.");
+    console.log("If Broc was already removed, './scripts/uninstall.sh' is not needed.");
   }
+}
+
+async function mcpConfigCommand(options: { client: ReturnType<typeof parseClientFlag>; copy: boolean }): Promise<void> {
+  const config = buildMcpConfig(appPaths.wrapperPath, options.client);
+  if (options.copy) {
+    const copied = copyTextToClipboard(config);
+    console.log(copied ? "Copied MCP config to the clipboard." : "Could not copy MCP config to the clipboard automatically.");
+  }
+  console.log(config);
+}
+
+async function fullUninstallCommand(): Promise<void> {
+  await resetInstalledRuntime(appPaths);
+  console.log("Broc uninstall complete.");
+  console.log("  staged runtime removed");
+  console.log("  managed Chromium removed");
+  console.log("  managed profile removed");
+  console.log("  public broc command removed");
+  console.log("  managed PATH block removed");
+  console.log("  repo checkout left intact");
+  console.log("  remove the MCP client config snippet manually if you no longer want Broc configured");
+}
+
+async function stageInstallCommand(options: { client: ReturnType<typeof parseClientFlag>; copy: boolean }): Promise<void> {
+  await ensureDistReady();
+  const { installVersion, stagedPaths, state, publicBin, pathSetup } = await installFromRepoBuild(appPaths, repoPaths);
+  const detectedClients = detectInstalledClients();
+  const preferredClients = detectedClients.filter((client) => client.status !== "not_found");
+
+  if (options.copy) {
+    const preferredClient = preferredClients[0]?.client ?? options.client;
+    const copied = copyTextToClipboard(buildMcpConfig(appPaths.wrapperPath, preferredClient));
+    console.log(copied ? `Copied ${preferredClient} MCP config to the clipboard.` : "Could not copy MCP config to the clipboard automatically.");
+  }
+
+  console.log(renderInstallSummary({
+    installVersion,
+    installRoot: stagedPaths.repoRoot,
+    managedRuntimePath: state.managedChromium?.executablePath ?? null,
+    wrapperPath: appPaths.wrapperPath,
+    publicExecutablePath: publicBin.executablePath,
+    pathSetup,
+    detectedClients,
+    copySupported: canCopyTextToClipboard(),
+  }));
 }
 
 async function startMcpServer(): Promise<void> {
@@ -580,7 +659,7 @@ async function startMcpServer(): Promise<void> {
     await access(repoPaths.mcpServerPath);
   } catch {
     console.error(`Error: MCP server not found at ${repoPaths.mcpServerPath}`);
-    console.error("Run 'npm run build' first.");
+    console.error("Run './scripts/install.sh' or build the runtime first.");
     process.exit(1);
   }
 
@@ -599,24 +678,31 @@ async function showHelp(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const command = process.argv[2] || "";
-  const argv = process.argv.slice(3);
-  const browserFlag = parseBrowserFlag(process.argv.slice(2), process.env);
+  const rawArgv = process.argv.slice(2);
+  const command = resolveCliCommand(rawArgv);
+  const argv = stripResolvedCommand(rawArgv, command);
+  const browserFlag = parseBrowserFlag(rawArgv, process.env);
   const browsers = targetBrowsers(browserFlag);
-  const url = parseUrlFlag(process.argv.slice(2));
-  const startMcp = !parseNoMcpFlag(process.argv.slice(2));
-  const jsonOutput = parseJsonFlag(process.argv.slice(2));
+  const url = parseUrlFlag(rawArgv);
+  const startMcp = !parseNoMcpFlag(rawArgv);
+  const jsonOutput = parseJsonFlag(rawArgv);
+  const client = parseClientFlag(rawArgv);
+  const copy = parseCopyFlag(rawArgv);
 
   await routeCliCommand(command, {
     setup: () => setupCommand(browsers),
-    launch: () => launchCommand(requireBrowserFlag(browserFlag, "launch"), url, { startMcp }),
+    launch: () => launchCommand(browserFlag ?? "chromium", url, { startMcp }),
+    serve: () => startMcpServer(),
     teardown: () => teardownCommand(browsers),
     install: () => installCommand(browsers),
-    uninstall: () => uninstallCommand(browsers),
+    uninstall: () => fullUninstallCommand(),
+    uninstallNativeHost: () => uninstallNativeHostCommand(browsers),
     status: () => statusCommand(browsers, { json: jsonOutput }),
+    mcpConfig: () => mcpConfigCommand({ client, copy }),
+    reset: () => fullUninstallCommand(),
+    stageInstall: () => stageInstallCommand({ client, copy }),
     snapshot: () => snapshotCommand(argv),
     help: () => showHelp(),
-    start: () => startMcpServer(),
     unknown: async (unknownCommand: string) => {
       console.error(`Unknown command: ${unknownCommand}`);
       console.error('Run "broc help" for usage.');

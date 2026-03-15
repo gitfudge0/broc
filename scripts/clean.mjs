@@ -46,7 +46,7 @@ export async function runClean(argv, dependencyOverrides = {}) {
 
   if (options.all && deps.exists(distCli)) {
     await deps.runNode([distCli, "teardown"]).catch(() => {});
-    await deps.runNode([distCli, "uninstall"]).catch(() => {});
+    await deps.runNode([distCli, "uninstall-native-host"]).catch(() => {});
   }
 
   await deps.removeDir(distDir);
