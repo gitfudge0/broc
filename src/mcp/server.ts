@@ -16,9 +16,10 @@
 //   browser_approve   — approve or deny a pending high-risk action
 // ============================================================
 
-import { access } from "fs/promises";
+import { access, readFile } from "fs/promises";
 import { fileURLToPath } from "url";
-import { dirname } from "path";
+import { createServer, type IncomingMessage, type ServerResponse } from "http";
+import { dirname, resolve } from "path";
 import { spawn } from "child_process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -47,6 +48,21 @@ import {
   formatBrowserStatusText,
   type BridgePhase,
 } from "../shared/bridge-status.js";
+import {
+  addCanvasArtifact,
+  appendCanvasEvent,
+  createCanvasTask,
+  ensureCanvasStore,
+  findCanvasTaskBySessionId,
+  listCanvasTasks,
+  loadCanvasTask,
+  markCanvasViewed,
+  readCanvasArtifact,
+  setCanvasAgentView,
+  setCanvasUserView,
+  updateCanvasMeta,
+} from "../canvas/store.js";
+import type { AgentView, UserView } from "../canvas/types.js";
 
 const log = createNodeLogger("mcp");
 const __filename = fileURLToPath(import.meta.url);
@@ -86,6 +102,9 @@ let nextApprovalId = 1;
 const APPROVAL_TIMEOUT_MS = 120_000;
 let bridgeWasConnected = false;
 let bridgeAutostartPromise: Promise<void> | null = null;
+let canvasServer: ReturnType<typeof createServer> | null = null;
+let canvasServerPort: number | null = null;
+let canvasServerReadyPromise: Promise<number> | null = null;
 
 // ---- Snapshot formatting ----
 
@@ -193,6 +212,150 @@ function getActionRef(action: Action): number | undefined {
     return action.ref;
   }
   return undefined;
+}
+
+function tryJsonParse<T>(value: string, fallback: T): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function okJson(res: ServerResponse, body: unknown): void {
+  res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(body));
+}
+
+function notFound(res: ServerResponse): void {
+  res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+  res.end("Not found");
+}
+
+async function canvasApiHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const url = new URL(req.url || "/", `http://127.0.0.1:${canvasServerPort ?? 0}`);
+  if (req.method !== "GET") {
+    res.writeHead(405, { "content-type": "text/plain; charset=utf-8" });
+    res.end("Method not allowed");
+    return;
+  }
+
+  if (url.pathname === "/canvas-api/tasks") {
+    okJson(res, await listCanvasTasks(appPaths));
+    return;
+  }
+
+  const taskMatch = url.pathname.match(/^\/canvas-api\/task\/([^/]+)$/);
+  if (taskMatch) {
+    const taskId = decodeURIComponent(taskMatch[1]);
+    const task = await loadCanvasTask(appPaths, taskId, { includeEvents: url.searchParams.get("events") === "1" });
+    await markCanvasViewed(appPaths, taskId);
+    okJson(res, task);
+    return;
+  }
+
+  const artifactMatch = url.pathname.match(/^\/canvas-api\/task\/([^/]+)\/artifact\/([^/]+)$/);
+  if (artifactMatch) {
+    const taskId = decodeURIComponent(artifactMatch[1]);
+    const artifactId = decodeURIComponent(artifactMatch[2]);
+    const artifact = await readCanvasArtifact(appPaths, taskId, artifactId);
+    if (!artifact) {
+      notFound(res);
+      return;
+    }
+    if (artifact.textContent !== undefined) {
+      res.writeHead(200, { "content-type": artifact.artifact.mimeType || "text/plain; charset=utf-8" });
+      res.end(artifact.textContent);
+      return;
+    }
+    res.writeHead(200, { "content-type": artifact.artifact.mimeType || "application/octet-stream" });
+    res.end(Buffer.from(artifact.base64Content || "", "base64"));
+    return;
+  }
+
+  if (url.pathname === "/" || url.pathname === "/canvas.html") {
+    const html = await readFile(resolve(repoPaths.distDir, "ui", "canvas.html"), "utf-8");
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(html);
+    return;
+  }
+
+  if (url.pathname === "/canvas.js") {
+    const js = await readFile(resolve(repoPaths.distDir, "ui", "canvas.js"));
+    res.writeHead(200, { "content-type": "application/javascript; charset=utf-8" });
+    res.end(js);
+    return;
+  }
+
+  notFound(res);
+}
+
+async function ensureCanvasServer(): Promise<number> {
+  if (canvasServerPort !== null) {
+    return canvasServerPort;
+  }
+
+  if (canvasServerReadyPromise) {
+    return canvasServerReadyPromise;
+  }
+
+  canvasServerReadyPromise = new Promise<number>((resolvePromise, rejectPromise) => {
+    const server = createServer((req, res) => {
+      canvasApiHandler(req, res).catch((error) => {
+        res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+        res.end(error instanceof Error ? error.message : String(error));
+      });
+    });
+
+    server.once("error", (error) => {
+      canvasServerReadyPromise = null;
+      rejectPromise(error);
+    });
+
+    server.once("listening", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        canvasServerReadyPromise = null;
+        rejectPromise(new Error("Canvas server did not expose a TCP port."));
+        return;
+      }
+      canvasServer = server;
+      canvasServerPort = address.port;
+      resolvePromise(address.port);
+    });
+
+    server.listen(0, "127.0.0.1");
+  });
+
+  return canvasServerReadyPromise;
+}
+
+async function openCanvasWindow(taskId?: string): Promise<string> {
+  const port = await ensureCanvasServer();
+  const url = taskId
+    ? `http://127.0.0.1:${port}/canvas.html?task=${encodeURIComponent(taskId)}`
+    : `http://127.0.0.1:${port}/canvas.html`;
+  await ensureBridgeReadyForRequest({ allowAutostart: true });
+  const response = await requestBridge({ type: "open_tab", url, active: true }) as { type: string; tab?: { id: number } };
+  if (response.type !== "open_tab_result") {
+    throw new Error("Could not open canvas tab.");
+  }
+  return url;
+}
+
+function summarizeCanvasTask(task: Awaited<ReturnType<typeof loadCanvasTask>>): string {
+  const lines = [
+    `${task.meta.title} [${task.meta.status}]`,
+    `Task ID: ${task.meta.id}`,
+    `Updated: ${task.meta.updatedAt}`,
+  ];
+  if (task.userView.summary) {
+    lines.push(`Summary: ${task.userView.summary}`);
+  }
+  if (task.meta.artifacts.length > 0) {
+    lines.push(`Artifacts: ${task.meta.artifacts.length}`);
+  }
+  return lines.join("\n");
 }
 
 // ---- Bridge error handling ----
@@ -1078,9 +1241,180 @@ server.tool(
   }
 );
 
+server.tool(
+  "canvas_create",
+  "Create a persistent task canvas for a long-running task.",
+  {
+    id: z.string().optional().describe("Optional stable task ID"),
+    title: z.string().describe("Human-readable task title"),
+    goal: z.string().optional().describe("Initial goal or summary"),
+    tags: z.array(z.string()).optional().describe("Optional task tags"),
+    sessionId: z.string().optional().describe("Optional linked browser session ID"),
+    tabId: z.number().optional().describe("Optional linked browser tab ID"),
+    open: z.boolean().optional().describe("Open the canvas UI after creation"),
+  },
+  async ({ id, title, goal, tags, sessionId, tabId, open }) => {
+    await ensureCanvasStore(appPaths);
+    const task = await createCanvasTask(appPaths, { id, title, goal, tags, sessionId, tabId });
+    if (open) {
+      await openCanvasWindow(task.meta.id).catch(() => {});
+    }
+    return {
+      content: [{
+        type: "text" as const,
+        text: `Created canvas ${task.meta.id}\n\n${summarizeCanvasTask(task)}`,
+      }],
+    };
+  }
+);
+
+server.tool(
+  "canvas_update",
+  "Update persistent canvas metadata such as title, status, tags, or linked browser context.",
+  {
+    taskId: z.string().describe("Canvas task ID"),
+    title: z.string().optional().describe("Updated title"),
+    status: z.enum(["pending", "running", "waiting", "blocked", "completed", "failed", "archived"]).optional().describe("Updated task status"),
+    tags: z.array(z.string()).optional().describe("Updated tags"),
+    sessionId: z.string().optional().describe("Linked browser session ID"),
+    tabId: z.number().optional().describe("Linked browser tab ID"),
+  },
+  async ({ taskId, title, status, tags, sessionId, tabId }) => {
+    const meta = await updateCanvasMeta(appPaths, taskId, { title, status, tags, sessionId, tabId });
+    return { content: [{ type: "text" as const, text: `Updated canvas ${meta.id} [${meta.status}]` }] };
+  }
+);
+
+server.tool(
+  "canvas_set_agent_view",
+  "Write or merge the agent-only view for a canvas task.",
+  {
+    taskId: z.string().describe("Canvas task ID"),
+    merge: z.boolean().optional().describe("Merge into the current agent view instead of replacing it"),
+    agentView: z.string().describe("JSON object string for the agent view"),
+  },
+  async ({ taskId, merge, agentView }) => {
+    const value = tryJsonParse<AgentView>(agentView, {});
+    const next = await setCanvasAgentView(appPaths, taskId, { merge, value });
+    return { content: [{ type: "text" as const, text: `Updated agent view for ${taskId}\n\n${JSON.stringify(next, null, 2)}` }] };
+  }
+);
+
+server.tool(
+  "canvas_set_user_view",
+  "Write or merge the user-visible view for a canvas task.",
+  {
+    taskId: z.string().describe("Canvas task ID"),
+    merge: z.boolean().optional().describe("Merge into the current user view instead of replacing it"),
+    userView: z.string().describe("JSON object string for the user view"),
+  },
+  async ({ taskId, merge, userView }) => {
+    const value = tryJsonParse<UserView>(userView, {});
+    const next = await setCanvasUserView(appPaths, taskId, { merge, value });
+    return { content: [{ type: "text" as const, text: `Updated user view for ${taskId}\n\n${JSON.stringify(next, null, 2)}` }] };
+  }
+);
+
+server.tool(
+  "canvas_append_event",
+  "Append a timeline event to a canvas task.",
+  {
+    taskId: z.string().describe("Canvas task ID"),
+    type: z.string().describe("Event type"),
+    actor: z.enum(["agent", "system", "user"]).optional().describe("Event actor"),
+    payload: z.string().optional().describe("Optional JSON object string payload"),
+  },
+  async ({ taskId, type, actor, payload }) => {
+    const event = await appendCanvasEvent(appPaths, taskId, {
+      type,
+      actor,
+      payload: payload ? tryJsonParse<Record<string, unknown>>(payload, {}) : {},
+    });
+    return { content: [{ type: "text" as const, text: `Appended event ${event.type} to ${taskId}` }] };
+  }
+);
+
+server.tool(
+  "canvas_add_artifact",
+  "Attach a persistent artifact to a canvas task from text, base64, or an existing file path.",
+  {
+    taskId: z.string().describe("Canvas task ID"),
+    kind: z.string().describe("Artifact kind, such as screenshot, extract, or file"),
+    name: z.string().describe("Artifact display name"),
+    mimeType: z.string().optional().describe("Artifact mime type"),
+    extension: z.string().optional().describe("Preferred file extension"),
+    sourcePath: z.string().optional().describe("Existing absolute file path to copy"),
+    textContent: z.string().optional().describe("Text content to save as an artifact"),
+    base64Content: z.string().optional().describe("Base64 content to save as a binary artifact"),
+  },
+  async ({ taskId, kind, name, mimeType, extension, sourcePath, textContent, base64Content }) => {
+    const artifact = await addCanvasArtifact(appPaths, taskId, {
+      kind,
+      name,
+      mimeType,
+      extension,
+      sourcePath,
+      textContent,
+      base64Content,
+    });
+    return { content: [{ type: "text" as const, text: `Added artifact ${artifact.name} to ${taskId}` }] };
+  }
+);
+
+server.tool(
+  "canvas_get",
+  "Read a canvas task and optionally include its event timeline.",
+  {
+    taskId: z.string().describe("Canvas task ID"),
+    includeEvents: z.boolean().optional().describe("Include the event timeline"),
+  },
+  async ({ taskId, includeEvents }) => {
+    const task = await loadCanvasTask(appPaths, taskId, { includeEvents });
+    return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
+  }
+);
+
+server.tool(
+  "canvas_list",
+  "List all persistent canvas tasks.",
+  {},
+  async () => {
+    const tasks = await listCanvasTasks(appPaths);
+    const lines = tasks.map((task) => `[${task.status}] ${task.title} (${task.id})`).join("\n");
+    return { content: [{ type: "text" as const, text: lines || "No canvas tasks found." }] };
+  }
+);
+
+server.tool(
+  "canvas_open",
+  "Open the canvas UI in the managed browser, optionally focused on a task.",
+  {
+    taskId: z.string().optional().describe("Canvas task ID to focus"),
+  },
+  async ({ taskId }) => {
+    const url = await openCanvasWindow(taskId);
+    return { content: [{ type: "text" as const, text: `Opened canvas UI at ${url}` }] };
+  }
+);
+
 // ---- Start server ----
 
 async function main(): Promise<void> {
+  await ensureCanvasStore(appPaths);
+  bridge.onEvent((message) => {
+    const event = message as { event?: string; sessionId?: string; tabId?: number; url?: string; type?: string };
+    if (event.type !== "event" || !event.sessionId) return;
+    void (async () => {
+      const linked = await findCanvasTaskBySessionId(appPaths, event.sessionId);
+      if (!linked) return;
+      await appendCanvasEvent(appPaths, linked.meta.id, {
+        type: "browser.event_linked",
+        actor: "system",
+        payload: event as unknown as Record<string, unknown>,
+      }).catch(() => {});
+    })();
+  });
+
   // Connect MCP server via stdio
   const transport = new StdioServerTransport();
   await server.connect(transport);

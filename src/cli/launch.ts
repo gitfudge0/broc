@@ -136,7 +136,7 @@ export async function waitForBridgeReady(options: {
   pingBridge: () => Promise<boolean>;
   sleep?: (ms: number) => Promise<void>;
 }): Promise<void> {
-  const timeoutMs = options.timeoutMs ?? 10000;
+  const timeoutMs = options.timeoutMs ?? 5000;
   const intervalMs = options.intervalMs ?? 200;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const deadline = Date.now() + timeoutMs;

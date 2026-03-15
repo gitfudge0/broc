@@ -281,7 +281,7 @@ All mutating actions return a fresh snapshot after execution.
 
 **`browser_wait`** — Wait for element state.
 - Params: `ref?`, `selector?`, `timeout?` (default 5000), `state?` (default "visible")
-- With no ref/selector: fixed-delay sleep (max 10s)
+- With no ref/selector: fixed-delay sleep (max 5s)
 
 **`browser_extract`** — Extract text/HTML/attribute.
 - Params: `ref?`, `selector?`, `extract` (required: text/innerHTML/outerHTML/attribute), `attribute?`
@@ -296,6 +296,51 @@ All mutating actions return a fresh snapshot after execution.
 **`browser_audit_log`** — View action audit log.
 - Params: `count?` (default 20), `sessionId?`
 - Max 1,000 entries (circular buffer)
+
+### Canvas Tools
+
+Canvas tools manage persistent task workspaces stored under Broc's data directory.
+
+**`canvas_create`** — Create a new persistent task canvas.
+- Params: `id?`, `title`, `goal?`, `tags?`, `sessionId?`, `tabId?`, `open?`
+
+**`canvas_update`** — Update task metadata.
+- Params: `taskId`, `title?`, `status?`, `tags?`, `sessionId?`, `tabId?`
+
+**`canvas_set_agent_view`** — Set or merge the agent-only view.
+- Params: `taskId`, `merge?`, `agentView` (JSON string)
+
+**`canvas_set_user_view`** — Set or merge the user-visible view.
+- Params: `taskId`, `merge?`, `userView` (JSON string)
+
+**`canvas_append_event`** — Add a timeline event.
+- Params: `taskId`, `type`, `actor?`, `payload?` (JSON string)
+
+**`canvas_add_artifact`** — Persist an artifact.
+- Params: `taskId`, `kind`, `name`, `mimeType?`, `extension?`, `sourcePath?`, `textContent?`, `base64Content?`
+
+**`canvas_get`** — Read a canvas task.
+- Params: `taskId`, `includeEvents?`
+
+**`canvas_list`** — List task summaries for the unified canvas UI.
+- No params
+
+**`canvas_open`** — Open the canvas UI in the managed browser.
+- Params: `taskId?`
+
+Canvas persistence layout:
+
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/broc/canvases`
+- macOS: `~/Library/Application Support/broc/canvases`
+
+Per task:
+
+- `index.json`
+- `tasks/<taskId>/meta.json`
+- `tasks/<taskId>/agent-view.json`
+- `tasks/<taskId>/user-view.json`
+- `tasks/<taskId>/events.ndjson`
+- `tasks/<taskId>/artifacts/*`
 
 ---
 

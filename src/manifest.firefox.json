@@ -20,5 +20,8 @@
   "background": {
     "scripts": ["background.js"],
     "type": "module"
+  },
+  "action": {
+    "default_title": "Broc Canvas"
   }
 }

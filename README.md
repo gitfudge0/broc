@@ -59,6 +59,20 @@ The installed runtime exposes:
 - `broc uninstall` to fully uninstall the staged runtime, managed browser, and managed profile
 - `broc reset` as a compatibility alias for `broc uninstall`
 
+## Canvas Feature
+
+Broc now ships with a persistent canvas feature for long-running tasks.
+
+- Agents can create and update canvases with MCP tools such as `canvas_create`, `canvas_update`, `canvas_set_agent_view`, `canvas_set_user_view`, `canvas_append_event`, `canvas_add_artifact`, `canvas_get`, `canvas_list`, and `canvas_open`.
+- Canvases persist across restarts under the Broc data directory.
+- The user-facing canvas UI is served locally by the MCP server and opens in the managed browser.
+- Each task has its own durable canvas record, while the UI presents a unified task list for switching between tasks.
+
+Persistent canvas storage lives here:
+
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/broc/canvases`
+- macOS: `~/Library/Application Support/broc/canvases`
+
 ## What The Installer Handles
 
 `./scripts/install.sh` performs:

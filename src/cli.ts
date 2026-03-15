@@ -253,7 +253,7 @@ async function setupCommand(browsers: BrowserType[]): Promise<void> {
   console.log("  npm run launch -- --browser=<name>");
 }
 
-async function waitForBridgeConnection(timeoutMs = 10000): Promise<void> {
+async function waitForBridgeConnection(timeoutMs = 5000): Promise<void> {
   await waitForBridgeReady({
     timeoutMs,
     isBridgeRunning,
@@ -439,7 +439,7 @@ async function launchCommand(
         spawnBrowser: () => browserProcess!,
         spawnMcpServer: () => spawnMcpServerProcess(),
         waitForChildSpawn,
-        waitForBridge: () => waitForBridgeConnection(10000),
+        waitForBridge: () => waitForBridgeConnection(5000),
         openLaunchUrl: () => openLaunchTab(launchUrl),
       },
     );

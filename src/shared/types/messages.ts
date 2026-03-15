@@ -202,6 +202,7 @@ export interface OpenTabResponse extends MessageBase {
   tab: TabInfo;
 }
 
+
 /** Basic tab information */
 export interface TabInfo {
   id: number;

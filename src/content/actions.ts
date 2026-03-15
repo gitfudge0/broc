@@ -403,7 +403,7 @@ async function executeWait(action: WaitAction): Promise<ActionResult> {
   }
 
   // Fixed timeout wait
-  await sleep(Math.min(timeout, 10000));
+  await sleep(Math.min(timeout, 5000));
   return makeSuccess();
 }
 

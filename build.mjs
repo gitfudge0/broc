@@ -109,6 +109,8 @@ async function copyStatic() {
 
   // Native host manifest template (shared — used by CLI install command)
   await cp("src/bridge/broc.json", "dist/broc.json");
+  await ensureDir("dist/ui");
+  await cp("src/ui/canvas.html", "dist/ui/canvas.html");
 }
 
 /**
@@ -187,6 +189,24 @@ async function buildNode() {
   await chmod("dist/cli.mjs", 0o755);
 }
 
+async function buildCanvasUi() {
+  const shared = {
+    bundle: true,
+    sourcemap: true,
+    format: "esm",
+    target: "chrome130",
+    logLevel: "info",
+  };
+
+  const chromeBuild = esbuild.build({
+    ...shared,
+    entryPoints: ["src/ui/canvas.ts"],
+    outfile: "dist/ui/canvas.js",
+  });
+
+  await chromeBuild;
+}
+
 // ---- Main ----
 
 if (watch) {
@@ -242,12 +262,22 @@ if (watch) {
     banner: { js: "#!/usr/bin/env node" },
     external: cliExternals,
   });
+  const canvasChromeCtx = await esbuild.context({
+    bundle: true,
+    sourcemap: true,
+    format: "esm",
+    target: "chrome130",
+    logLevel: "info",
+    entryPoints: ["src/ui/canvas.ts"],
+    outfile: "dist/ui/canvas.js",
+  });
 
   await copyStatic();
   await Promise.all([
     fxBgCtx.watch(), fxContentCtx.watch(),
     crBgCtx.watch(), crContentCtx.watch(),
     bridgeCtx.watch(), mcpCtx.watch(), cliCtx.watch(),
+    canvasChromeCtx.watch(),
   ]);
   console.log("Watching for changes (Firefox + Chrome)...");
 } else {
@@ -261,6 +291,7 @@ if (watch) {
   const firefoxBuild = runtimeOnly ? Promise.resolve() : buildExtension("firefox", firefoxExtension);
   const chromeBuild = buildExtension("chrome", chromeExtension, chromeBanner);
   const nodeBuild = buildNode();
+  const uiBuild = buildCanvasUi();
 
-  await Promise.all([firefoxBuild, chromeBuild, nodeBuild]);
+  await Promise.all([firefoxBuild, chromeBuild, nodeBuild, uiBuild]);
 }

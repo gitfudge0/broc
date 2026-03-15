@@ -34,3 +34,9 @@
 - Treat the approval request as a checkpoint.
 - Restate what the action will do.
 - After approval, verify the resulting page state with a fresh snapshot or extract.
+
+## Manual Intervention Needed
+
+- If the site requires CAPTCHA solving, MFA, passkeys, SSO approval, payment confirmation, or a secret the agent does not have, pause and ask the user to handle that step.
+- If the page is restricted or the browser refuses automation on it, explain the limitation and ask the user to move the flow back to a normal automatable page.
+- After the user finishes the manual action, re-check `browser_status` and continue from a fresh `browser_snapshot`.
