@@ -24,36 +24,37 @@ Keep the browser lazy by default. Prefer MCP integrations that run `broc serve`;
 ## Operating Loop
 
 1. Call `browser_status` if runtime readiness is unclear.
-2. Create or update a canvas for any non-trivial task so the task has durable history and a user-visible result view.
-3. Record the user request in the canvas before doing substantial work.
+2. Create or update a notebook for any non-trivial task so the task has durable history and a user-visible result view.
+3. Record the user request in the notebook before doing substantial work.
 4. Call `browser_snapshot` before acting.
 5. Use refs only from the latest snapshot.
 6. Take the smallest safe action.
-7. After every meaningful action or page change, update the canvas before moving on.
+7. After every meaningful action or page change, update the notebook before moving on.
 8. Re-snapshot after navigation or any action that can change page state.
 9. Use `browser_tabs` when tab focus or active context is unclear.
 
-## Canvas Discipline
+## Notebook Discipline
 
-- Use canvas for any task that is multi-step, long-running, likely to produce artifacts, or where the user will benefit from a persistent result view.
-- Create the canvas early with `canvas_create` and include the task goal in the initial canvas state.
-- Treat the canvas as the durable task record: keep a simple history of what the agent did, what the user asked for, and what results were produced.
-- Keep the user request visible in the canvas, either in `userView.summary`, a dedicated section, or highlights.
-- Use `canvas_append_event` after every meaningful action, decision, page transition, opened result, saved finding, or change in plan so the timeline answers "what happened" without reading raw chat logs.
-- Use `canvas_set_agent_view` for private working state such as plan, checkpoints, notes, and machine-friendly scratch data.
-- Use `canvas_set_user_view` for the parts the user should see: requested outputs, findings, summaries, artifacts, and next actions.
-- Use `canvas_add_artifact` for screenshots, extracts, saved files, generated reports, or any output the user may want to revisit.
-- Keep the canvas current through the task, not only at the end.
-- Do not wait until the task is done to add findings. If the agent visits five promising pages, the canvas should already show those five pages, why they mattered, and any artifacts captured from them.
-- When exploring multiple candidates, keep a running list of candidates reviewed, links visited, and keep/reject decisions in the canvas.
+- Use notebook for any task that is multi-step, long-running, likely to produce artifacts, or where the user will benefit from a persistent result view.
+- Create the notebook early with `notebook_create` and include the task goal in the initial notebook state.
+- Treat the notebook as the durable task record: keep a simple history of what the agent did, what the user asked for, and what results were produced.
+- Keep the user request visible in the notebook, either in `view.summary`, a dedicated section, or highlights.
+- Use `notebook_append_event` after every meaningful action, and expect Broc to also mirror every browser action and browser event into the linked notebook timeline so the record includes clicks, typing, navigation, waits, extracts, snapshots, screenshots, approvals, and page transitions.
+- Every task completed inside the workflow must be appended to the notebook timeline with `notebook_append_event`; do not leave completed subtasks implied only by the final summary.
+- Use `notebook_set_view` for the parts the user should see: requested outputs, findings, summaries, artifacts, current status, and next actions.
+- Use `notebook_add_artifact` for screenshots, extracts, saved files, generated reports, or any output the user may want to revisit.
+- Keep the notebook current through the task, not only at the end.
+- Do not wait until the task is done to add findings. If the agent visits five promising pages, the notebook should already show those five pages, why they mattered, and any artifacts captured from them.
+- When exploring multiple candidates, keep a running list of candidates reviewed, links visited, and keep/reject decisions in the notebook.
+- When the task finishes, append a final completion event and call `notebook_open` so the finished notebook is visible to the user.
 
-## Canvas Defaults
+## Notebook Defaults
 
-- In agent view, track at least: goal, current plan, important checkpoints, and concise notes about important actions taken.
-- In user view, track at least: what the user asked for, current status, key findings so far, links/pages reviewed, and the final result or deliverables.
+- In the notebook view, track at least: what the user asked for, current status, key findings so far, links/pages reviewed, and the final result or deliverables.
+- Put user-facing research output in `view.sections`, `view.highlights`, and `view.summary`; do not invent ad hoc top-level keys for final results when the content should be rendered in the notebook UI.
 - When a browser workflow changes tabs, pages, or state in important ways, add a short event describing it.
-- When the task finishes, ensure the user view reads like a clean result page rather than a raw debug dump.
-- For research tasks, keep the user view populated during the task with sections such as `Task Request`, `Pages Reviewed`, `Promising Finds`, `Rejected Options`, and `Next Steps`.
+- When the task finishes, ensure the notebook view reads like a clean result page rather than a raw debug dump.
+- For research tasks, keep the notebook view populated during the task with sections such as `Task Request`, `Pages Reviewed`, `Promising Finds`, `Rejected Options`, and `Next Steps`.
 
 ## CLI vs MCP
 
@@ -69,7 +70,7 @@ Keep the browser lazy by default. Prefer MCP integrations that run `broc serve`;
 - Visual confirmation: `browser_screenshot` only when layout, rendering, or non-textual state matters
 - Actions: `browser_click`, `browser_type`, `browser_press`, `browser_scroll`, `browser_navigate`, `browser_select`, `browser_wait`
 - Safety: `browser_approve`, `browser_audit_log`
-- Canvas: `canvas_create`, `canvas_update`, `canvas_set_agent_view`, `canvas_set_user_view`, `canvas_append_event`, `canvas_add_artifact`, `canvas_get`, `canvas_list`, `canvas_open`
+- Notebook: `notebook_create`, `notebook_update`, `notebook_set_view`, `notebook_append_event`, `notebook_add_artifact`, `notebook_get`, `notebook_list`, `notebook_open`
 
 If the client namespaces tool names, use the exact exposed tool name from the client and map it by suffix. Example: `browser-control_browser_snapshot` is the same operation as `browser_snapshot`.
 
@@ -90,12 +91,12 @@ If the client namespaces tool names, use the exact exposed tool name from the cl
 ## Screenshots
 
 - Skip screenshots for forms, tables, text extraction, and most navigation tasks.
-- Use screenshots for visual QA, pixel/layout checks, canvases, charts, maps, image-based CAPTCHAs, or when the user explicitly asks what the page looks like.
+- Use screenshots for visual QA, pixel/layout checks, notebooks, charts, maps, image-based CAPTCHAs, or when the user explicitly asks what the page looks like.
 - When using screenshots, still take a structural snapshot first so actions use stable refs.
-- For visual decision-making tasks such as design research, inspiration gathering, layout comparison, or style selection, take screenshots as evidence and save the important ones to the canvas as artifacts.
-- When a screenshot is part of the reasoning, add a canvas event describing what the screenshot showed and why it mattered.
-- If the client or Broc host exposes screenshot-based X/Y coordinate clicking, use it to probe visually ambiguous targets from the screenshot, then record the action and result in the canvas.
-- After any coordinate-based click or screenshot-driven exploration step, re-snapshot, note what changed, and save any important before/after screenshots to the canvas.
+- For visual decision-making tasks such as design research, inspiration gathering, layout comparison, or style selection, take screenshots as evidence and save the important ones to the notebook as artifacts.
+- When a screenshot is part of the reasoning, add a notebook event describing what the screenshot showed and why it mattered.
+- If the client or Broc host exposes screenshot-based X/Y coordinate clicking, use it to probe visually ambiguous targets from the screenshot, then record the action and result in the notebook.
+- After any coordinate-based click or screenshot-driven exploration step, re-snapshot, note what changed, and save any important before/after screenshots to the notebook.
 
 ## References
 

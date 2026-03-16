@@ -1,5 +1,5 @@
 /**
- * Design tokens and global stylesheet for the Broc Canvas UI.
+ * Design tokens and global stylesheet for the Broc Notebook UI.
  *
  * Inspired by editorial / magazine aesthetics: warm neutrals, strong
  * typographic hierarchy, generous whitespace, and restrained accent color.
@@ -49,8 +49,8 @@ export const themeCSS = /* css */ `
   --sidebar-bg: rgba(250, 248, 244, 0.85);
 
   /* typography */
-  --font-display:  'Inter', 'Helvetica Neue', Arial, sans-serif;
-  --font-body:     Georgia, 'Iowan Old Style', 'Palatino Linotype', serif;
+  --font-display:  'Fraunces', 'Times New Roman', serif;
+  --font-body:     'Manrope', 'Helvetica Neue', sans-serif;
   --font-mono:     'JetBrains Mono', 'Fira Code', 'Menlo', monospace;
 
   /* spacing (4px base) */
@@ -159,6 +159,17 @@ a {
   text-decoration: none;
 }
 a:hover { text-decoration: underline; }
+
+.short-link {
+  font-family: var(--font-display);
+  font-size: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+}
+.short-link:hover {
+  text-decoration: underline;
+}
 
 pre, code { font-family: var(--font-mono); }
 

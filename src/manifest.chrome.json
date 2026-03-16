@@ -20,6 +20,6 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Broc Canvas"
+    "default_title": "Broc Notebook"
   }
 }

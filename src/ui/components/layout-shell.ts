@@ -20,7 +20,8 @@ export function layoutShell({ sidebar, main }: LayoutShellProps): string {
 export const layoutShellCSS = /* css */ `
 .shell {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  align-items: start;
   min-height: 100vh;
 }
 
@@ -37,11 +38,12 @@ export const layoutShellCSS = /* css */ `
   display: flex;
   flex-direction: column;
   gap: var(--sp-6);
+  min-width: 0;
 }
 
 .shell__main {
   padding: var(--sp-8) var(--sp-8) var(--sp-9);
-  max-width: 980px;
+  min-width: 0;
 }
 
 @media (max-width: 900px) {
@@ -62,6 +64,7 @@ export const layoutShellCSS = /* css */ `
     overflow-x: auto;
     gap: var(--sp-2);
     padding-bottom: var(--sp-2);
+    align-items: stretch;
   }
   .shell__main {
     padding: var(--sp-6);

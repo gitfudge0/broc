@@ -1,22 +1,21 @@
-import { mkdir, readFile, readdir, stat, writeFile, copyFile } from "fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile, copyFile } from "fs/promises";
 import { extname, resolve } from "path";
 import { randomUUID } from "crypto";
 import type { AppPaths } from "../cli/paths.js";
 import type {
-  AgentView,
-  CanvasAppendEventInput,
-  CanvasArtifact,
-  CanvasArtifactContent,
-  CanvasArtifactInput,
-  CanvasCreateInput,
-  CanvasEvent,
-  CanvasIndex,
-  CanvasMetaUpdate,
-  CanvasTaskMeta,
-  CanvasTaskRecord,
-  CanvasTaskSummary,
-  CanvasViewUpdate,
-  UserView,
+  NotebookAppendEventInput,
+  NotebookArtifact,
+  NotebookArtifactContent,
+  NotebookArtifactInput,
+  NotebookCreateInput,
+  NotebookEvent,
+  NotebookIndex,
+  NotebookMetaUpdate,
+  NotebookTaskMeta,
+  NotebookTaskRecord,
+  NotebookTaskSummary,
+  NotebookView,
+  NotebookViewUpdate,
 } from "./types.js";
 
 const SCHEMA_VERSION = 1;
@@ -24,22 +23,25 @@ const SCHEMA_VERSION = 1;
 interface TaskPaths {
   taskDir: string;
   metaPath: string;
-  agentViewPath: string;
-  userViewPath: string;
+  viewPath: string;
   eventsPath: string;
   artifactsDir: string;
 }
 
-function canvasRoot(appPaths: AppPaths): string {
+function legacyCanvasRoot(appPaths: AppPaths): string {
   return resolve(appPaths.dataDir, "canvases");
 }
 
+function notebookRoot(appPaths: AppPaths): string {
+  return resolve(appPaths.dataDir, "notebooks");
+}
+
 function tasksRoot(appPaths: AppPaths): string {
-  return resolve(canvasRoot(appPaths), "tasks");
+  return resolve(notebookRoot(appPaths), "tasks");
 }
 
 function indexPath(appPaths: AppPaths): string {
-  return resolve(canvasRoot(appPaths), "index.json");
+  return resolve(notebookRoot(appPaths), "index.json");
 }
 
 function taskPaths(appPaths: AppPaths, taskId: string): TaskPaths {
@@ -47,8 +49,7 @@ function taskPaths(appPaths: AppPaths, taskId: string): TaskPaths {
   return {
     taskDir,
     metaPath: resolve(taskDir, "meta.json"),
-    agentViewPath: resolve(taskDir, "agent-view.json"),
-    userViewPath: resolve(taskDir, "user-view.json"),
+    viewPath: resolve(taskDir, "view.json"),
     eventsPath: resolve(taskDir, "events.ndjson"),
     artifactsDir: resolve(taskDir, "artifacts"),
   };
@@ -84,11 +85,15 @@ function sanitizeTaskId(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || randomUUID();
 }
 
+function resolveTaskId(input: NotebookCreateInput): string {
+  return sanitizeTaskId(input.id ?? input.title ?? randomUUID());
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-function toSummary(meta: CanvasTaskMeta, userView: UserView): CanvasTaskSummary {
+function toSummary(meta: NotebookTaskMeta, view: NotebookView): NotebookTaskSummary {
   return {
     id: meta.id,
     title: meta.title,
@@ -96,7 +101,7 @@ function toSummary(meta: CanvasTaskMeta, userView: UserView): CanvasTaskSummary 
     updatedAt: meta.updatedAt,
     createdAt: meta.createdAt,
     tags: meta.tags,
-    summary: userView.summary,
+    summary: view.summary,
   };
 }
 
@@ -104,10 +109,10 @@ function mergeRecord<T extends Record<string, unknown>>(current: T, incoming: T)
   return { ...current, ...incoming };
 }
 
-function defaultMeta(input: CanvasCreateInput): CanvasTaskMeta {
+function defaultMeta(input: NotebookCreateInput): NotebookTaskMeta {
   const timestamp = nowIso();
   return {
-    id: sanitizeTaskId(input.id ?? randomUUID()),
+    id: resolveTaskId(input),
     title: input.title,
     status: "pending",
     createdAt: timestamp,
@@ -119,29 +124,33 @@ function defaultMeta(input: CanvasCreateInput): CanvasTaskMeta {
   };
 }
 
-function defaultAgentView(input: CanvasCreateInput): AgentView {
-  return input.goal ? { goal: input.goal } : {};
-}
-
-function defaultUserView(input: CanvasCreateInput): UserView {
+function defaultView(input: NotebookCreateInput): NotebookView {
   return input.goal ? { summary: input.goal } : {};
 }
 
-async function loadIndex(appPaths: AppPaths): Promise<CanvasIndex> {
+async function deleteLegacyCanvasData(appPaths: AppPaths): Promise<void> {
+  const legacyRoot = legacyCanvasRoot(appPaths);
+  if (await pathExists(legacyRoot)) {
+    await rm(legacyRoot, { recursive: true, force: true });
+  }
+}
+
+async function loadIndex(appPaths: AppPaths): Promise<NotebookIndex> {
   return readJson(indexPath(appPaths), {
     schemaVersion: SCHEMA_VERSION,
     updatedAt: nowIso(),
     tasks: [],
-  } satisfies CanvasIndex);
+  } satisfies NotebookIndex);
 }
 
-async function saveIndex(appPaths: AppPaths, index: CanvasIndex): Promise<void> {
+async function saveIndex(appPaths: AppPaths, index: NotebookIndex): Promise<void> {
   index.updatedAt = nowIso();
   await writeJson(indexPath(appPaths), index);
 }
 
-export async function ensureCanvasStore(appPaths: AppPaths): Promise<void> {
-  await ensureDir(canvasRoot(appPaths));
+export async function ensureNotebookStore(appPaths: AppPaths): Promise<void> {
+  await deleteLegacyCanvasData(appPaths);
+  await ensureDir(notebookRoot(appPaths));
   await ensureDir(tasksRoot(appPaths));
   const idxPath = indexPath(appPaths);
   if (!await pathExists(idxPath)) {
@@ -153,97 +162,99 @@ export async function ensureCanvasStore(appPaths: AppPaths): Promise<void> {
   }
 }
 
-export async function createCanvasTask(appPaths: AppPaths, input: CanvasCreateInput): Promise<CanvasTaskRecord> {
-  await ensureCanvasStore(appPaths);
-  const meta = defaultMeta(input);
-  const paths = taskPaths(appPaths, meta.id);
+export async function createNotebookTask(appPaths: AppPaths, input: NotebookCreateInput): Promise<NotebookTaskRecord> {
+  await ensureNotebookStore(appPaths);
+  const taskId = resolveTaskId(input);
+  const paths = taskPaths(appPaths, taskId);
 
   if (await pathExists(paths.taskDir)) {
-    throw new Error(`Canvas task already exists: ${meta.id}`);
+    await updateNotebookMeta(appPaths, taskId, {
+      title: input.title,
+      tags: input.tags,
+      sessionId: input.sessionId,
+      tabId: input.tabId,
+    });
+    return loadNotebookTask(appPaths, taskId, { includeEvents: true });
   }
 
+  const meta = defaultMeta({ ...input, id: taskId });
+  const view = defaultView(input);
   await ensureDir(paths.artifactsDir);
-  const agentView = defaultAgentView(input);
-  const userView = defaultUserView(input);
   await writeJson(paths.metaPath, meta);
-  await writeJson(paths.agentViewPath, agentView);
-  await writeJson(paths.userViewPath, userView);
+  await writeJson(paths.viewPath, view);
   await writeFile(paths.eventsPath, "", "utf-8");
 
-  const created = await appendCanvasEvent(appPaths, meta.id, {
+  const created = await appendNotebookEvent(appPaths, meta.id, {
     type: "task.created",
     actor: "system",
     payload: { title: meta.title, goal: input.goal, tags: input.tags },
   });
 
   const index = await loadIndex(appPaths);
-  index.tasks = [toSummary(meta, userView), ...index.tasks.filter((task) => task.id !== meta.id)];
+  index.tasks = [toSummary(meta, view), ...index.tasks.filter((task) => task.id !== meta.id)];
   await saveIndex(appPaths, index);
 
-  return { meta, agentView, userView, events: [created] };
+  return { meta, view, events: [created] };
 }
 
-export async function listCanvasTasks(appPaths: AppPaths): Promise<CanvasTaskSummary[]> {
-  await ensureCanvasStore(appPaths);
+export async function listNotebookTasks(appPaths: AppPaths): Promise<NotebookTaskSummary[]> {
+  await ensureNotebookStore(appPaths);
   const index = await loadIndex(appPaths);
-  return [...index.tasks].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return [...index.tasks].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-async function loadTaskMeta(appPaths: AppPaths, taskId: string): Promise<CanvasTaskMeta> {
-  const meta = await readJson<CanvasTaskMeta | null>(taskPaths(appPaths, taskId).metaPath, null);
+async function loadTaskMeta(appPaths: AppPaths, taskId: string): Promise<NotebookTaskMeta> {
+  const meta = await readJson<NotebookTaskMeta | null>(taskPaths(appPaths, taskId).metaPath, null);
   if (!meta) {
-    throw new Error(`Canvas task not found: ${taskId}`);
+    throw new Error(`Notebook task not found: ${taskId}`);
   }
   return meta;
 }
 
-export async function loadCanvasTask(
+export async function loadNotebookTask(
   appPaths: AppPaths,
   taskId: string,
   options: { includeEvents?: boolean } = {},
-): Promise<CanvasTaskRecord> {
-  await ensureCanvasStore(appPaths);
+): Promise<NotebookTaskRecord> {
+  await ensureNotebookStore(appPaths);
   const paths = taskPaths(appPaths, taskId);
   const meta = await loadTaskMeta(appPaths, taskId);
-  const [agentView, userView] = await Promise.all([
-    readJson<AgentView>(paths.agentViewPath, {}),
-    readJson<UserView>(paths.userViewPath, {}),
-  ]);
-  const events = options.includeEvents ? await readCanvasEvents(appPaths, taskId) : undefined;
-  return { meta, agentView, userView, events };
+  const view = await readJson<NotebookView>(paths.viewPath, {});
+  const events = options.includeEvents ? await readNotebookEvents(appPaths, taskId) : undefined;
+  return { meta, view, events };
 }
 
-async function updateIndexEntry(appPaths: AppPaths, meta: CanvasTaskMeta, userView: UserView): Promise<void> {
+async function updateIndexEntry(appPaths: AppPaths, meta: NotebookTaskMeta, view: NotebookView): Promise<void> {
   const index = await loadIndex(appPaths);
-  const summary = toSummary(meta, userView);
+  const summary = toSummary(meta, view);
   index.tasks = [summary, ...index.tasks.filter((task) => task.id !== meta.id)];
   await saveIndex(appPaths, index);
 }
 
-async function touchTask(appPaths: AppPaths, taskId: string): Promise<CanvasTaskMeta> {
+async function touchTask(appPaths: AppPaths, taskId: string): Promise<NotebookTaskMeta> {
   const paths = taskPaths(appPaths, taskId);
   const meta = await loadTaskMeta(appPaths, taskId);
   const nextMeta = { ...meta, updatedAt: nowIso() };
   await writeJson(paths.metaPath, nextMeta);
-  const userView = await readJson<UserView>(paths.userViewPath, {});
-  await updateIndexEntry(appPaths, nextMeta, userView);
+  const view = await readJson<NotebookView>(paths.viewPath, {});
+  await updateIndexEntry(appPaths, nextMeta, view);
   return nextMeta;
 }
 
-export async function updateCanvasMeta(appPaths: AppPaths, taskId: string, update: CanvasMetaUpdate): Promise<CanvasTaskMeta> {
-  await ensureCanvasStore(appPaths);
+export async function updateNotebookMeta(appPaths: AppPaths, taskId: string, update: NotebookMetaUpdate): Promise<NotebookTaskMeta> {
+  await ensureNotebookStore(appPaths);
   const paths = taskPaths(appPaths, taskId);
   const meta = await loadTaskMeta(appPaths, taskId);
-  const nextMeta: CanvasTaskMeta = {
+  const nextMeta: NotebookTaskMeta = {
     ...meta,
     ...update,
     updatedAt: nowIso(),
     archivedAt: update.status === "archived" ? (meta.archivedAt ?? nowIso()) : meta.archivedAt,
   };
   await writeJson(paths.metaPath, nextMeta);
-  const userView = await readJson<UserView>(paths.userViewPath, {});
-  await updateIndexEntry(appPaths, nextMeta, userView);
-  await appendCanvasEvent(appPaths, taskId, {
+  const view = await readJson<NotebookView>(paths.viewPath, {});
+  await updateIndexEntry(appPaths, nextMeta, view);
+  await appendNotebookEvent(appPaths, taskId, {
     type: update.status && update.status !== meta.status ? "task.status_changed" : "task.updated",
     actor: "system",
     payload: update as Record<string, unknown>,
@@ -251,56 +262,34 @@ export async function updateCanvasMeta(appPaths: AppPaths, taskId: string, updat
   return nextMeta;
 }
 
-export async function setCanvasAgentView(
+export async function setNotebookView(
   appPaths: AppPaths,
   taskId: string,
-  update: CanvasViewUpdate<AgentView>,
-): Promise<AgentView> {
-  await ensureCanvasStore(appPaths);
+  update: NotebookViewUpdate<NotebookView>,
+): Promise<NotebookView> {
+  await ensureNotebookStore(appPaths);
   const paths = taskPaths(appPaths, taskId);
   await loadTaskMeta(appPaths, taskId);
-  const current = await readJson<AgentView>(paths.agentViewPath, {});
+  const current = await readJson<NotebookView>(paths.viewPath, {});
   const next = update.merge
-    ? mergeRecord(current as Record<string, unknown>, update.value as Record<string, unknown>) as AgentView
+    ? mergeRecord(current as Record<string, unknown>, update.value as Record<string, unknown>) as NotebookView
     : update.value;
-  await writeJson(paths.agentViewPath, next);
-  await touchTask(appPaths, taskId);
-  await appendCanvasEvent(appPaths, taskId, {
-    type: "agent.view_updated",
-    actor: "agent",
-    payload: { merge: !!update.merge },
-  });
-  return next;
-}
-
-export async function setCanvasUserView(
-  appPaths: AppPaths,
-  taskId: string,
-  update: CanvasViewUpdate<UserView>,
-): Promise<UserView> {
-  await ensureCanvasStore(appPaths);
-  const paths = taskPaths(appPaths, taskId);
-  await loadTaskMeta(appPaths, taskId);
-  const current = await readJson<UserView>(paths.userViewPath, {});
-  const next = update.merge
-    ? mergeRecord(current as Record<string, unknown>, update.value as Record<string, unknown>) as UserView
-    : update.value;
-  await writeJson(paths.userViewPath, next);
+  await writeJson(paths.viewPath, next);
   const refreshedMeta = await touchTask(appPaths, taskId);
   await updateIndexEntry(appPaths, refreshedMeta, next);
-  await appendCanvasEvent(appPaths, taskId, {
-    type: "user.view_updated",
+  await appendNotebookEvent(appPaths, taskId, {
+    type: "notebook.view_updated",
     actor: "agent",
     payload: { merge: !!update.merge },
   });
   return next;
 }
 
-export async function appendCanvasEvent(appPaths: AppPaths, taskId: string, input: CanvasAppendEventInput): Promise<CanvasEvent> {
-  await ensureCanvasStore(appPaths);
+export async function appendNotebookEvent(appPaths: AppPaths, taskId: string, input: NotebookAppendEventInput): Promise<NotebookEvent> {
+  await ensureNotebookStore(appPaths);
   const paths = taskPaths(appPaths, taskId);
   await loadTaskMeta(appPaths, taskId);
-  const event: CanvasEvent = {
+  const event: NotebookEvent = {
     id: randomUUID(),
     taskId,
     type: input.type,
@@ -313,22 +302,22 @@ export async function appendCanvasEvent(appPaths: AppPaths, taskId: string, inpu
   return event;
 }
 
-export async function readCanvasEvents(appPaths: AppPaths, taskId: string): Promise<CanvasEvent[]> {
+export async function readNotebookEvents(appPaths: AppPaths, taskId: string): Promise<NotebookEvent[]> {
   const paths = taskPaths(appPaths, taskId);
   try {
     const raw = await readFile(paths.eventsPath, "utf-8");
     return raw
       .split("\n")
       .filter(Boolean)
-      .map((line) => JSON.parse(line) as CanvasEvent)
+      .map((line) => JSON.parse(line) as NotebookEvent)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   } catch {
     return [];
   }
 }
 
-export async function addCanvasArtifact(appPaths: AppPaths, taskId: string, input: CanvasArtifactInput): Promise<CanvasArtifact> {
-  await ensureCanvasStore(appPaths);
+export async function addNotebookArtifact(appPaths: AppPaths, taskId: string, input: NotebookArtifactInput): Promise<NotebookArtifact> {
+  await ensureNotebookStore(appPaths);
   const paths = taskPaths(appPaths, taskId);
   const meta = await loadTaskMeta(appPaths, taskId);
   await ensureDir(paths.artifactsDir);
@@ -354,7 +343,7 @@ export async function addCanvasArtifact(appPaths: AppPaths, taskId: string, inpu
     throw new Error("Artifact requires sourcePath, textContent, or base64Content.");
   }
 
-  const artifact: CanvasArtifact = {
+  const artifact: NotebookArtifact = {
     id: artifactId,
     name: input.name,
     kind: input.kind,
@@ -368,9 +357,9 @@ export async function addCanvasArtifact(appPaths: AppPaths, taskId: string, inpu
   meta.artifacts = [artifact, ...meta.artifacts];
   meta.updatedAt = nowIso();
   await writeJson(paths.metaPath, meta);
-  const userView = await readJson<UserView>(paths.userViewPath, {});
-  await updateIndexEntry(appPaths, meta, userView);
-  await appendCanvasEvent(appPaths, taskId, {
+  const view = await readJson<NotebookView>(paths.viewPath, {});
+  await updateIndexEntry(appPaths, meta, view);
+  await appendNotebookEvent(appPaths, taskId, {
     type: "artifact.added",
     actor: "agent",
     payload: artifact as unknown as Record<string, unknown>,
@@ -378,12 +367,12 @@ export async function addCanvasArtifact(appPaths: AppPaths, taskId: string, inpu
   return artifact;
 }
 
-export async function readCanvasArtifact(
+export async function readNotebookArtifact(
   appPaths: AppPaths,
   taskId: string,
   artifactId: string,
-): Promise<CanvasArtifactContent | null> {
-  const record = await loadCanvasTask(appPaths, taskId);
+): Promise<NotebookArtifactContent | null> {
+  const record = await loadNotebookTask(appPaths, taskId);
   const artifact = record.meta.artifacts.find((item) => item.id === artifactId);
   if (!artifact) return null;
 
@@ -397,18 +386,30 @@ export async function readCanvasArtifact(
   };
 }
 
-export async function markCanvasViewed(appPaths: AppPaths, taskId: string): Promise<CanvasTaskMeta> {
+export async function markNotebookViewed(appPaths: AppPaths, taskId: string): Promise<NotebookTaskMeta> {
   const paths = taskPaths(appPaths, taskId);
   const meta = await loadTaskMeta(appPaths, taskId);
-  const next = { ...meta, lastViewedAt: nowIso(), updatedAt: nowIso() };
+  const next = { ...meta, lastViewedAt: nowIso() };
   await writeJson(paths.metaPath, next);
-  const userView = await readJson<UserView>(paths.userViewPath, {});
-  await updateIndexEntry(appPaths, next, userView);
+  const view = await readJson<NotebookView>(paths.viewPath, {});
+  await updateIndexEntry(appPaths, next, view);
   return next;
 }
 
-export async function listCanvasTaskIds(appPaths: AppPaths): Promise<string[]> {
-  await ensureCanvasStore(appPaths);
+export async function deleteNotebookTask(appPaths: AppPaths, taskId: string): Promise<void> {
+  await ensureNotebookStore(appPaths);
+  const paths = taskPaths(appPaths, taskId);
+  if (!(await pathExists(paths.taskDir))) {
+    throw new Error(`Notebook task not found: ${taskId}`);
+  }
+  await rm(paths.taskDir, { recursive: true, force: true });
+  const index = await loadIndex(appPaths);
+  index.tasks = index.tasks.filter((task) => task.id !== taskId);
+  await saveIndex(appPaths, index);
+}
+
+export async function listNotebookTaskIds(appPaths: AppPaths): Promise<string[]> {
+  await ensureNotebookStore(appPaths);
   try {
     const entries = await readdir(tasksRoot(appPaths), { withFileTypes: true });
     return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
@@ -417,11 +418,22 @@ export async function listCanvasTaskIds(appPaths: AppPaths): Promise<string[]> {
   }
 }
 
-export async function findCanvasTaskBySessionId(appPaths: AppPaths, sessionId: string): Promise<CanvasTaskRecord | null> {
-  const ids = await listCanvasTaskIds(appPaths);
+export async function findNotebookTaskBySessionId(appPaths: AppPaths, sessionId: string): Promise<NotebookTaskRecord | null> {
+  const ids = await listNotebookTaskIds(appPaths);
   for (const taskId of ids) {
-    const task = await loadCanvasTask(appPaths, taskId).catch(() => null);
+    const task = await loadNotebookTask(appPaths, taskId).catch(() => null);
     if (task?.meta.sessionId === sessionId) {
+      return task;
+    }
+  }
+  return null;
+}
+
+export async function findNotebookTaskByTabId(appPaths: AppPaths, tabId: number): Promise<NotebookTaskRecord | null> {
+  const ids = await listNotebookTaskIds(appPaths);
+  for (const taskId of ids) {
+    const task = await loadNotebookTask(appPaths, taskId).catch(() => null);
+    if (task?.meta.tabId === tabId) {
       return task;
     }
   }

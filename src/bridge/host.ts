@@ -154,7 +154,7 @@ function parseSocketFrames(state: SocketReadState, chunk: Buffer): unknown[] {
 // ---- Message types ----
 
 /** Valid request types (MCP → extension via bridge) */
-const VALID_REQUEST_TYPES = new Set(["observe", "act", "list_tabs", "extension_status", "open_tab", "interrupt", "ping"]);
+const VALID_REQUEST_TYPES = new Set(["observe", "act", "list_tabs", "extension_status", "open_tab", "open_notebook", "interrupt", "ping"]);
 
 /** Valid response/event types (extension → MCP via bridge) */
 const VALID_RESPONSE_TYPES = new Set([
@@ -163,6 +163,7 @@ const VALID_RESPONSE_TYPES = new Set([
   "list_tabs_result",
   "extension_status_result",
   "open_tab_result",
+  "open_notebook_result",
   "interrupt_result",
   "pong",
   "error",

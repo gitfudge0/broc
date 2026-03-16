@@ -59,19 +59,19 @@ The installed runtime exposes:
 - `broc uninstall` to fully uninstall the staged runtime, managed browser, and managed profile
 - `broc reset` as a compatibility alias for `broc uninstall`
 
-## Canvas Feature
+## Notebook Feature
 
-Broc now ships with a persistent canvas feature for long-running tasks.
+Broc now ships with a persistent notebook feature for long-running tasks.
 
-- Agents can create and update canvases with MCP tools such as `canvas_create`, `canvas_update`, `canvas_set_agent_view`, `canvas_set_user_view`, `canvas_append_event`, `canvas_add_artifact`, `canvas_get`, `canvas_list`, and `canvas_open`.
-- Canvases persist across restarts under the Broc data directory.
-- The user-facing canvas UI is served locally by the MCP server and opens in the managed browser.
-- Each task has its own durable canvas record, while the UI presents a unified task list for switching between tasks.
+- Agents can create and update notebooks with MCP tools such as `notebook_create`, `notebook_update`, `notebook_set_view`, `notebook_append_event`, `notebook_add_artifact`, `notebook_get`, `notebook_list`, and `notebook_open`.
+- Notebooks persist across restarts under the Broc data directory.
+- The user-facing notebook UI is served locally by the MCP server and opens in the managed browser.
+- Each task has its own durable notebook record, while the UI presents a unified task list for switching between tasks.
 
-Persistent canvas storage lives here:
+Persistent notebook storage lives here:
 
-- Linux: `${XDG_DATA_HOME:-~/.local/share}/broc/canvases`
-- macOS: `~/Library/Application Support/broc/canvases`
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/broc/notebooks`
+- macOS: `~/Library/Application Support/broc/notebooks`
 
 ## What The Installer Handles
 

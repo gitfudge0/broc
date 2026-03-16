@@ -45,3 +45,22 @@ export function formatStatus(status: string): string {
 export function padOrdinal(n: number): string {
   return String(n).padStart(2, "0");
 }
+
+const URL_RE = /^https?:\/\/\S+$/;
+
+/** Check if a string looks like a URL. */
+export function isUrl(value: string): boolean {
+  return URL_RE.test(value.trim());
+}
+
+/**
+ * Render a value that may be a URL. If it is, return a clickable `<a>` tag
+ * with the text "Link". Otherwise return the escaped text.
+ */
+export function renderMaybeUrl(value: string): string {
+  const trimmed = value.trim();
+  if (isUrl(trimmed)) {
+    return `<a class="short-link" href="${escapeHtml(trimmed)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(trimmed)}">Link</a>`;
+  }
+  return escapeHtml(value);
+}

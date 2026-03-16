@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   handleExtensionStatusRequest,
+  handleOpenNotebookRequest,
   handleOpenTabRequest,
   normalizeTabInfo,
 } from "../background/bridge-requests.js";
@@ -91,6 +92,53 @@ describe("handleOpenTabRequest", () => {
   });
 });
 
+describe("handleOpenNotebookRequest", () => {
+  it("returns open_notebook_result with the resolved notebook URL", async () => {
+    const response = await handleOpenNotebookRequest(
+      {
+        type: "open_notebook",
+        id: "req_notebook",
+        sessionId: "default",
+      },
+      {
+        getNotebookUrl: vi.fn(async () => "http://127.0.0.1:43123/notebook.html"),
+      },
+    );
+
+    expect(response).toEqual({
+      type: "open_notebook_result",
+      id: "req_notebook",
+      sessionId: "default",
+      url: "http://127.0.0.1:43123/notebook.html",
+    });
+  });
+
+  it("returns a structured error when notebook URL resolution fails", async () => {
+    const response = await handleOpenNotebookRequest(
+      {
+        type: "open_notebook",
+        id: "req_notebook_err",
+        sessionId: "default",
+      },
+      {
+        getNotebookUrl: vi.fn(async () => {
+          throw new Error("notebook unavailable");
+        }),
+      },
+    );
+
+    expect(response).toEqual({
+      type: "error",
+      id: "req_notebook_err",
+      sessionId: "default",
+      error: {
+        code: "internal_error",
+        message: "notebook unavailable",
+      },
+    });
+  });
+});
+
 describe("handleExtensionStatusRequest", () => {
   it("returns the current extension protocol and capabilities", () => {
     const response = handleExtensionStatusRequest(
@@ -112,6 +160,7 @@ describe("handleExtensionStatusRequest", () => {
       protocolVersion: 2,
       capabilities: {
         openTab: true,
+        openNotebook: true,
       },
     });
   });

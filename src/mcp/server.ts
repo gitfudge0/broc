@@ -16,15 +16,14 @@
 //   browser_approve   — approve or deny a pending high-risk action
 // ============================================================
 
-import { access, readFile } from "fs/promises";
+import { access } from "fs/promises";
 import { fileURLToPath } from "url";
-import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { dirname, resolve } from "path";
 import { spawn } from "child_process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { BridgeClient, BridgeClientError, getPidPath, getSocketPath } from "./bridge-client.js";
+import { BridgeClient, BridgeClientError, getPidPath, getSocketPath, requestNotebookUrl } from "./bridge-client.js";
 import type { Action } from "../shared/types/actions.js";
 import type {
   ElementContext,
@@ -49,20 +48,19 @@ import {
   type BridgePhase,
 } from "../shared/bridge-status.js";
 import {
-  addCanvasArtifact,
-  appendCanvasEvent,
-  createCanvasTask,
-  ensureCanvasStore,
-  findCanvasTaskBySessionId,
-  listCanvasTasks,
-  loadCanvasTask,
-  markCanvasViewed,
-  readCanvasArtifact,
-  setCanvasAgentView,
-  setCanvasUserView,
-  updateCanvasMeta,
-} from "../canvas/store.js";
-import type { AgentView, UserView } from "../canvas/types.js";
+  addNotebookArtifact,
+  appendNotebookEvent,
+  createNotebookTask,
+  ensureNotebookStore,
+  listNotebookTasks,
+  loadNotebookTask,
+  setNotebookView,
+  updateNotebookMeta,
+} from "../notebook/store.js";
+import { getNotebookUrl } from "../notebook/server.js";
+import { TaskBindingRegistry } from "../notebook/task-bindings.js";
+import type { NotebookView } from "../notebook/types.js";
+import type { AuditEntry } from "../shared/types/safety.js";
 
 const log = createNodeLogger("mcp");
 const __filename = fileURLToPath(import.meta.url);
@@ -102,9 +100,9 @@ let nextApprovalId = 1;
 const APPROVAL_TIMEOUT_MS = 120_000;
 let bridgeWasConnected = false;
 let bridgeAutostartPromise: Promise<void> | null = null;
-let canvasServer: ReturnType<typeof createServer> | null = null;
-let canvasServerPort: number | null = null;
-let canvasServerReadyPromise: Promise<number> | null = null;
+let lastSessionId = "default";
+let lastTabId: number | undefined;
+const notebookTaskBindings = new TaskBindingRegistry();
 
 // ---- Snapshot formatting ----
 
@@ -131,6 +129,7 @@ interface SnapshotElement {
 
 interface Snapshot {
   version: number;
+  sessionId?: string;
   url: string;
   title: string;
   viewport: { width: number; height: number };
@@ -214,6 +213,121 @@ function getActionRef(action: Action): number | undefined {
   return undefined;
 }
 
+function getCurrentSessionId(): string {
+  return lastSessionId;
+}
+
+async function findLinkedNotebookTask(params: { sessionId?: string; tabId?: number }): Promise<{ meta: { id: string } } | null> {
+  const taskId = notebookTaskBindings.resolve(params);
+  return taskId ? loadNotebookTask(appPaths, taskId).catch(() => null) : null;
+}
+
+function bindNotebookTask(taskId: string, params: { sessionId?: string; tabId?: number }): void {
+  notebookTaskBindings.bind(taskId, params);
+}
+
+async function hydrateNotebookTaskBindings(): Promise<void> {
+  const tasks = await listNotebookTasks(appPaths);
+  const bindings = await Promise.all(tasks.map(async (task) => {
+    const record = await loadNotebookTask(appPaths, task.id).catch(() => null);
+    if (!record) return null;
+    return {
+      taskId: record.meta.id,
+      sessionId: record.meta.sessionId,
+      tabId: record.meta.tabId,
+    };
+  }));
+  notebookTaskBindings.seed(bindings.filter((binding): binding is NonNullable<typeof binding> => !!binding));
+}
+
+function summarizeActionTarget(action: Action): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  if ("ref" in action && typeof action.ref === "number") payload.ref = action.ref;
+  if (action.type === "navigate") payload.url = action.url;
+  if (action.type === "type") {
+    payload.textLength = action.text.length;
+    if (action.clear !== undefined) payload.clear = action.clear;
+    if (action.submit !== undefined) payload.submit = action.submit;
+  }
+  if (action.type === "press") payload.key = action.key;
+  if (action.type === "scroll") {
+    payload.direction = action.direction;
+    if (action.amount !== undefined) payload.amount = action.amount;
+  }
+  if (action.type === "select") payload.values = action.values;
+  if (action.type === "wait") {
+    if (action.selector) payload.selector = action.selector;
+    if (action.timeout !== undefined) payload.timeout = action.timeout;
+    if (action.state) payload.state = action.state;
+  }
+  if (action.type === "extract") {
+    payload.extract = action.extract;
+    if (action.selector) payload.selector = action.selector;
+    if (action.attribute) payload.attribute = action.attribute;
+  }
+  return payload;
+}
+
+async function appendBrowserActionEvent(params: {
+  action: Action;
+  tabId?: number;
+  sessionId?: string;
+  phase: "requested" | "completed" | "failed" | "approval_requested" | "approved" | "denied";
+  risk?: ReturnType<typeof assessRisk>;
+  durationMs?: number;
+  result?: { success: boolean; data?: string; error?: { message?: string; code?: string } };
+  approvalId?: string;
+  snapshot?: Snapshot | null;
+}): Promise<void> {
+  const linked = await findLinkedNotebookTask({ sessionId: params.sessionId, tabId: params.tabId });
+  if (!linked) return;
+
+  const snapshot = params.snapshot || lastSnapshot;
+  const payload: Record<string, unknown> = {
+    phase: params.phase,
+    actionType: params.action.type,
+    tabId: params.tabId,
+    sessionId: params.sessionId,
+    pageUrl: snapshot?.url,
+    pageTitle: snapshot?.title,
+    snapshotVersion: snapshot?.version,
+    description: describeAction(params.action, getActionRef(params.action) !== undefined ? getElementContext(getActionRef(params.action)!) : undefined),
+    ...summarizeActionTarget(params.action),
+  };
+
+  if (params.risk) {
+    payload.riskLevel = params.risk.level;
+    payload.riskTags = params.risk.tags;
+  }
+  if (params.durationMs !== undefined) payload.durationMs = params.durationMs;
+  if (params.approvalId) payload.approvalId = params.approvalId;
+  if (params.result) {
+    payload.success = params.result.success;
+    if (params.result.data !== undefined) payload.data = params.result.data;
+    if (params.result.error?.message) payload.error = params.result.error.message;
+    if (params.result.error?.code) payload.errorCode = params.result.error.code;
+  }
+
+  await appendNotebookEvent(appPaths, linked.meta.id, {
+    type: `browser.action.${params.phase}`,
+    actor: "system",
+    payload,
+  }).catch(() => {});
+}
+
+async function mirrorAuditEntryToNotebook(entry: AuditEntry, phase: "approval_requested" | "completed" | "failed"): Promise<void> {
+  await appendBrowserActionEvent({
+    action: entry.action,
+    tabId: entry.tabId,
+    sessionId: entry.sessionId,
+    phase,
+    risk: entry.risk,
+    durationMs: entry.durationMs,
+    result: entry.result,
+    snapshot: lastSnapshot,
+  });
+}
+
 function tryJsonParse<T>(value: string, fallback: T): T {
   try {
     return JSON.parse(value) as T;
@@ -222,135 +336,30 @@ function tryJsonParse<T>(value: string, fallback: T): T {
   }
 }
 
-function okJson(res: ServerResponse, body: unknown): void {
-  res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(body));
-}
-
-function notFound(res: ServerResponse): void {
-  res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-  res.end("Not found");
-}
-
-async function canvasApiHandler(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const url = new URL(req.url || "/", `http://127.0.0.1:${canvasServerPort ?? 0}`);
-  if (req.method !== "GET") {
-    res.writeHead(405, { "content-type": "text/plain; charset=utf-8" });
-    res.end("Method not allowed");
-    return;
-  }
-
-  if (url.pathname === "/canvas-api/tasks") {
-    okJson(res, await listCanvasTasks(appPaths));
-    return;
-  }
-
-  const taskMatch = url.pathname.match(/^\/canvas-api\/task\/([^/]+)$/);
-  if (taskMatch) {
-    const taskId = decodeURIComponent(taskMatch[1]);
-    const task = await loadCanvasTask(appPaths, taskId, { includeEvents: url.searchParams.get("events") === "1" });
-    await markCanvasViewed(appPaths, taskId);
-    okJson(res, task);
-    return;
-  }
-
-  const artifactMatch = url.pathname.match(/^\/canvas-api\/task\/([^/]+)\/artifact\/([^/]+)$/);
-  if (artifactMatch) {
-    const taskId = decodeURIComponent(artifactMatch[1]);
-    const artifactId = decodeURIComponent(artifactMatch[2]);
-    const artifact = await readCanvasArtifact(appPaths, taskId, artifactId);
-    if (!artifact) {
-      notFound(res);
-      return;
-    }
-    if (artifact.textContent !== undefined) {
-      res.writeHead(200, { "content-type": artifact.artifact.mimeType || "text/plain; charset=utf-8" });
-      res.end(artifact.textContent);
-      return;
-    }
-    res.writeHead(200, { "content-type": artifact.artifact.mimeType || "application/octet-stream" });
-    res.end(Buffer.from(artifact.base64Content || "", "base64"));
-    return;
-  }
-
-  if (url.pathname === "/" || url.pathname === "/canvas.html") {
-    const html = await readFile(resolve(repoPaths.distDir, "ui", "canvas.html"), "utf-8");
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    res.end(html);
-    return;
-  }
-
-  if (url.pathname === "/canvas.js") {
-    const js = await readFile(resolve(repoPaths.distDir, "ui", "canvas.js"));
-    res.writeHead(200, { "content-type": "application/javascript; charset=utf-8" });
-    res.end(js);
-    return;
-  }
-
-  notFound(res);
-}
-
-async function ensureCanvasServer(): Promise<number> {
-  if (canvasServerPort !== null) {
-    return canvasServerPort;
-  }
-
-  if (canvasServerReadyPromise) {
-    return canvasServerReadyPromise;
-  }
-
-  canvasServerReadyPromise = new Promise<number>((resolvePromise, rejectPromise) => {
-    const server = createServer((req, res) => {
-      canvasApiHandler(req, res).catch((error) => {
-        res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
-        res.end(error instanceof Error ? error.message : String(error));
-      });
-    });
-
-    server.once("error", (error) => {
-      canvasServerReadyPromise = null;
-      rejectPromise(error);
-    });
-
-    server.once("listening", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        canvasServerReadyPromise = null;
-        rejectPromise(new Error("Canvas server did not expose a TCP port."));
-        return;
-      }
-      canvasServer = server;
-      canvasServerPort = address.port;
-      resolvePromise(address.port);
-    });
-
-    server.listen(0, "127.0.0.1");
-  });
-
-  return canvasServerReadyPromise;
-}
-
-async function openCanvasWindow(taskId?: string): Promise<string> {
-  const port = await ensureCanvasServer();
-  const url = taskId
-    ? `http://127.0.0.1:${port}/canvas.html?task=${encodeURIComponent(taskId)}`
-    : `http://127.0.0.1:${port}/canvas.html`;
+async function openNotebookWindow(taskId?: string): Promise<string> {
   await ensureBridgeReadyForRequest({ allowAutostart: true });
+  let url: string;
+  try {
+    url = await requestNotebookUrl({ taskId });
+  } catch {
+    url = await getNotebookUrl({ appPaths, repoPaths, taskId });
+  }
+
   const response = await requestBridge({ type: "open_tab", url, active: true }) as { type: string; tab?: { id: number } };
   if (response.type !== "open_tab_result") {
-    throw new Error("Could not open canvas tab.");
+    throw new Error("Could not open notebook tab.");
   }
   return url;
 }
 
-function summarizeCanvasTask(task: Awaited<ReturnType<typeof loadCanvasTask>>): string {
+function summarizeNotebookTask(task: Awaited<ReturnType<typeof loadNotebookTask>>): string {
   const lines = [
     `${task.meta.title} [${task.meta.status}]`,
     `Task ID: ${task.meta.id}`,
     `Updated: ${task.meta.updatedAt}`,
   ];
-  if (task.userView.summary) {
-    lines.push(`Summary: ${task.userView.summary}`);
+  if (task.view.summary) {
+    lines.push(`Summary: ${task.view.summary}`);
   }
   if (task.meta.artifacts.length > 0) {
     lines.push(`Artifacts: ${task.meta.artifacts.length}`);
@@ -600,6 +609,11 @@ async function requestBridge(message: Record<string, unknown>): Promise<unknown>
   return bridge.request(message);
 }
 
+function rememberBrowserContext(params: { sessionId?: string; tabId?: number }): void {
+  if (params.sessionId) lastSessionId = params.sessionId;
+  if (params.tabId !== undefined) lastTabId = params.tabId;
+}
+
 // ---- Safety-aware action execution ----
 
 /**
@@ -649,7 +663,7 @@ async function executeActionWithSafety(
 
     // Record in audit log as pending approval
     const auditId = auditLog.record({
-      sessionId: "default",
+      sessionId: getCurrentSessionId(),
       tabId,
       action,
       risk,
@@ -659,6 +673,16 @@ async function executeActionWithSafety(
     });
 
     // Return the approval request to the agent — they must call browser_approve
+    await appendBrowserActionEvent({
+      action,
+      tabId,
+      sessionId: getCurrentSessionId(),
+      phase: "approval_requested",
+      risk,
+      approvalId,
+      snapshot: lastSnapshot,
+    });
+
     const lines: string[] = [
       `## Approval Required`,
       ``,
@@ -715,7 +739,7 @@ async function executeAndLog(
 
   // Record in audit log
   const auditId = auditLog.record({
-    sessionId: "default",
+    sessionId: getCurrentSessionId(),
     tabId,
     action,
     risk,
@@ -730,6 +754,7 @@ async function executeAndLog(
   // Execute via bridge
   let response: {
     type: string;
+    sessionId?: string;
     result?: { success: boolean; data?: string; error?: { message: string } };
     snapshot?: Snapshot;
     error?: { message: string };
@@ -744,6 +769,8 @@ async function executeAndLog(
   } catch (err) {
     return await bridgeError(err);
   }
+
+  rememberBrowserContext({ sessionId: response.sessionId, tabId });
 
   const durationMs = Date.now() - startTime;
 
@@ -765,6 +792,14 @@ async function executeAndLog(
     snapshotVersionAfter: response.snapshot?.version,
     durationMs,
   });
+
+  const auditEntry = auditLog.getRecent(1).find((entry) => entry.entryId === auditId);
+  if (auditEntry) {
+    await mirrorAuditEntryToNotebook(
+      auditEntry,
+      auditEntry.result?.success ? "completed" : "failed",
+    );
+  }
 
   // Format response
   if (response.type === "error") {
@@ -907,7 +942,7 @@ server.tool(
     tabId: z.number().optional().describe("Tab ID to observe (omit for active tab)"),
   },
   async ({ tabId }) => {
-    let response: { type: string; snapshot?: Snapshot; error?: { message: string } };
+    let response: { type: string; sessionId?: string; snapshot?: Snapshot; error?: { message: string } };
 
     try {
       response = (await requestBridge({
@@ -926,6 +961,24 @@ server.tool(
     if (response.snapshot) {
       lastSnapshot = response.snapshot;
     }
+    rememberBrowserContext({ sessionId: response.sessionId, tabId });
+
+    const linked = await findLinkedNotebookTask({ sessionId: response.sessionId, tabId });
+    if (linked && response.snapshot) {
+      await appendNotebookEvent(appPaths, linked.meta.id, {
+        type: "browser.observation.snapshot",
+        actor: "system",
+        payload: {
+          pageUrl: response.snapshot.url,
+          pageTitle: response.snapshot.title,
+          tabId,
+          sessionId: response.sessionId,
+          snapshotVersion: response.snapshot.version,
+          elementCount: response.snapshot.elements.length,
+          totalElements: response.snapshot.totalElements,
+        },
+      }).catch(() => {});
+    }
 
     const text = response.snapshot ? formatSnapshot(response.snapshot) : "No snapshot available";
     return { content: [{ type: "text" as const, text }] };
@@ -940,7 +993,7 @@ server.tool(
     tabId: z.number().optional().describe("Tab ID to capture (omit for active tab)"),
   },
   async ({ tabId }) => {
-    let response: { type: string; screenshot?: string; error?: { message: string } };
+    let response: { type: string; sessionId?: string; screenshot?: string; snapshot?: Snapshot; error?: { message: string } };
 
     try {
       response = (await requestBridge({
@@ -962,6 +1015,32 @@ server.tool(
     }
 
     const base64 = response.screenshot.replace(/^data:image\/\w+;base64,/, "");
+    rememberBrowserContext({ sessionId: response.sessionId, tabId });
+
+    const linked = await findLinkedNotebookTask({ sessionId: response.sessionId, tabId });
+    if (linked) {
+      await appendNotebookEvent(appPaths, linked.meta.id, {
+        type: "browser.observation.screenshot",
+        actor: "system",
+        payload: {
+          tabId,
+          sessionId: response.sessionId,
+          pageUrl: lastSnapshot?.url,
+          pageTitle: lastSnapshot?.title,
+        },
+      }).catch(() => {});
+
+      // Auto-save screenshot as a notebook artifact
+      const screenshotName = `screenshot-${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
+      await addNotebookArtifact(appPaths, linked.meta.id, {
+        kind: "screenshot",
+        name: screenshotName,
+        mimeType: "image/png",
+        extension: ".png",
+        base64Content: base64,
+      }).catch(() => {});
+    }
+
     return {
       content: [{ type: "image" as const, data: base64, mimeType: "image/png" }],
     };
@@ -1118,6 +1197,19 @@ server.tool(
     }
 
     const tabs = response.tabs || [];
+    const linked = await findLinkedNotebookTask({ sessionId: getCurrentSessionId(), tabId: lastTabId });
+    if (linked) {
+      await appendNotebookEvent(appPaths, linked.meta.id, {
+        type: "browser.observation.tabs",
+        actor: "system",
+        payload: {
+          sessionId: getCurrentSessionId(),
+          tabCount: tabs.length,
+          activeTabId: tabs.find((tab) => tab.active)?.id,
+        },
+      }).catch(() => {});
+    }
+
     const lines = tabs.map(
       (t) => `${t.active ? "→ " : "  "}[${t.id}] ${t.title}\n    ${t.url}`
     );
@@ -1154,8 +1246,8 @@ server.tool(
 
     if (decision === "deny") {
       // Log the denial
-      auditLog.record({
-        sessionId: "default",
+      const deniedId = auditLog.record({
+        sessionId: getCurrentSessionId(),
         tabId: pending.tabId,
         action: pending.action,
         risk: pending.request.risk,
@@ -1169,6 +1261,19 @@ server.tool(
         pageUrl: pending.request.pageUrl,
       });
 
+      const denied = auditLog.getRecent(1).find((entry) => entry.entryId === deniedId);
+      if (denied) {
+        await appendBrowserActionEvent({
+          action: denied.action,
+          tabId: denied.tabId,
+          sessionId: denied.sessionId,
+          phase: "denied",
+          risk: denied.risk,
+          approvalId,
+          snapshot: lastSnapshot,
+        });
+      }
+
       return {
         content: [{
           type: "text" as const,
@@ -1178,6 +1283,16 @@ server.tool(
     }
 
     // Approved — execute the action
+    await appendBrowserActionEvent({
+      action: pending.action,
+      tabId: pending.tabId,
+      sessionId: getCurrentSessionId(),
+      phase: "approved",
+      risk: pending.request.risk,
+      approvalId,
+      snapshot: lastSnapshot,
+    });
+
     const content = await executeAndLog(
       pending.action,
       pending.request.risk,
@@ -1195,6 +1310,21 @@ server.tool(
   {},
   async () => {
     const report = await collectStatusForError();
+    const linked = await findLinkedNotebookTask({ sessionId: getCurrentSessionId(), tabId: lastTabId });
+    if (linked) {
+      await appendNotebookEvent(appPaths, linked.meta.id, {
+        type: "browser.observation.status",
+        actor: "system",
+        payload: {
+          sessionId: getCurrentSessionId(),
+          bridgePhase: report.bridge.phase,
+          buildReady: report.buildReady,
+          setupStatePresent: report.setupStatePresent,
+          summary: formatBrowserStatusText(report).split("\n")[0],
+        },
+      }).catch(() => {});
+    }
+
     return {
       content: [{
         type: "text" as const,
@@ -1242,8 +1372,8 @@ server.tool(
 );
 
 server.tool(
-  "canvas_create",
-  "Create a persistent task canvas for a long-running task.",
+  "notebook_create",
+  "Create a persistent task notebook for a long-running task.",
   {
     id: z.string().optional().describe("Optional stable task ID"),
     title: z.string().describe("Human-readable task title"),
@@ -1251,28 +1381,29 @@ server.tool(
     tags: z.array(z.string()).optional().describe("Optional task tags"),
     sessionId: z.string().optional().describe("Optional linked browser session ID"),
     tabId: z.number().optional().describe("Optional linked browser tab ID"),
-    open: z.boolean().optional().describe("Open the canvas UI after creation"),
+    open: z.boolean().optional().describe("Open the notebook UI after creation"),
   },
   async ({ id, title, goal, tags, sessionId, tabId, open }) => {
-    await ensureCanvasStore(appPaths);
-    const task = await createCanvasTask(appPaths, { id, title, goal, tags, sessionId, tabId });
+    await ensureNotebookStore(appPaths);
+    const task = await createNotebookTask(appPaths, { id, title, goal, tags, sessionId, tabId });
+    bindNotebookTask(task.meta.id, { sessionId: task.meta.sessionId, tabId: task.meta.tabId });
     if (open) {
-      await openCanvasWindow(task.meta.id).catch(() => {});
+      await openNotebookWindow(task.meta.id).catch(() => {});
     }
     return {
       content: [{
         type: "text" as const,
-        text: `Created canvas ${task.meta.id}\n\n${summarizeCanvasTask(task)}`,
+        text: `Created notebook ${task.meta.id}\n\n${summarizeNotebookTask(task)}`,
       }],
     };
   }
 );
 
 server.tool(
-  "canvas_update",
-  "Update persistent canvas metadata such as title, status, tags, or linked browser context.",
+  "notebook_update",
+  "Update persistent notebook metadata such as title, status, tags, or linked browser context.",
   {
-    taskId: z.string().describe("Canvas task ID"),
+    taskId: z.string().describe("Notebook task ID"),
     title: z.string().optional().describe("Updated title"),
     status: z.enum(["pending", "running", "waiting", "blocked", "completed", "failed", "archived"]).optional().describe("Updated task status"),
     tags: z.array(z.string()).optional().describe("Updated tags"),
@@ -1280,52 +1411,38 @@ server.tool(
     tabId: z.number().optional().describe("Linked browser tab ID"),
   },
   async ({ taskId, title, status, tags, sessionId, tabId }) => {
-    const meta = await updateCanvasMeta(appPaths, taskId, { title, status, tags, sessionId, tabId });
-    return { content: [{ type: "text" as const, text: `Updated canvas ${meta.id} [${meta.status}]` }] };
+    const meta = await updateNotebookMeta(appPaths, taskId, { title, status, tags, sessionId, tabId });
+    bindNotebookTask(meta.id, { sessionId: meta.sessionId, tabId: meta.tabId });
+    return { content: [{ type: "text" as const, text: `Updated notebook ${meta.id} [${meta.status}]` }] };
   }
 );
 
 server.tool(
-  "canvas_set_agent_view",
-  "Write or merge the agent-only view for a canvas task.",
+  "notebook_set_view",
+  "Write or merge the notebook view for a task.",
   {
-    taskId: z.string().describe("Canvas task ID"),
-    merge: z.boolean().optional().describe("Merge into the current agent view instead of replacing it"),
-    agentView: z.string().describe("JSON object string for the agent view"),
+    taskId: z.string().describe("Notebook task ID"),
+    merge: z.boolean().optional().describe("Merge into the current view instead of replacing it"),
+    view: z.string().describe("JSON object string for the notebook view"),
   },
-  async ({ taskId, merge, agentView }) => {
-    const value = tryJsonParse<AgentView>(agentView, {});
-    const next = await setCanvasAgentView(appPaths, taskId, { merge, value });
-    return { content: [{ type: "text" as const, text: `Updated agent view for ${taskId}\n\n${JSON.stringify(next, null, 2)}` }] };
+  async ({ taskId, merge, view }) => {
+    const value = tryJsonParse<NotebookView>(view, {});
+    const next = await setNotebookView(appPaths, taskId, { merge, value });
+    return { content: [{ type: "text" as const, text: `Updated notebook view for ${taskId}\n\n${JSON.stringify(next, null, 2)}` }] };
   }
 );
 
 server.tool(
-  "canvas_set_user_view",
-  "Write or merge the user-visible view for a canvas task.",
+  "notebook_append_event",
+  "Append a timeline event to a notebook task.",
   {
-    taskId: z.string().describe("Canvas task ID"),
-    merge: z.boolean().optional().describe("Merge into the current user view instead of replacing it"),
-    userView: z.string().describe("JSON object string for the user view"),
-  },
-  async ({ taskId, merge, userView }) => {
-    const value = tryJsonParse<UserView>(userView, {});
-    const next = await setCanvasUserView(appPaths, taskId, { merge, value });
-    return { content: [{ type: "text" as const, text: `Updated user view for ${taskId}\n\n${JSON.stringify(next, null, 2)}` }] };
-  }
-);
-
-server.tool(
-  "canvas_append_event",
-  "Append a timeline event to a canvas task.",
-  {
-    taskId: z.string().describe("Canvas task ID"),
+    taskId: z.string().describe("Notebook task ID"),
     type: z.string().describe("Event type"),
     actor: z.enum(["agent", "system", "user"]).optional().describe("Event actor"),
     payload: z.string().optional().describe("Optional JSON object string payload"),
   },
   async ({ taskId, type, actor, payload }) => {
-    const event = await appendCanvasEvent(appPaths, taskId, {
+    const event = await appendNotebookEvent(appPaths, taskId, {
       type,
       actor,
       payload: payload ? tryJsonParse<Record<string, unknown>>(payload, {}) : {},
@@ -1335,10 +1452,10 @@ server.tool(
 );
 
 server.tool(
-  "canvas_add_artifact",
-  "Attach a persistent artifact to a canvas task from text, base64, or an existing file path.",
+  "notebook_add_artifact",
+  "Attach a persistent artifact to a notebook task from text, base64, or an existing file path.",
   {
-    taskId: z.string().describe("Canvas task ID"),
+    taskId: z.string().describe("Notebook task ID"),
     kind: z.string().describe("Artifact kind, such as screenshot, extract, or file"),
     name: z.string().describe("Artifact display name"),
     mimeType: z.string().optional().describe("Artifact mime type"),
@@ -1348,7 +1465,7 @@ server.tool(
     base64Content: z.string().optional().describe("Base64 content to save as a binary artifact"),
   },
   async ({ taskId, kind, name, mimeType, extension, sourcePath, textContent, base64Content }) => {
-    const artifact = await addCanvasArtifact(appPaths, taskId, {
+    const artifact = await addNotebookArtifact(appPaths, taskId, {
       kind,
       name,
       mimeType,
@@ -1362,52 +1479,55 @@ server.tool(
 );
 
 server.tool(
-  "canvas_get",
-  "Read a canvas task and optionally include its event timeline.",
+  "notebook_get",
+  "Read a notebook task and optionally include its event timeline.",
   {
-    taskId: z.string().describe("Canvas task ID"),
+    taskId: z.string().describe("Notebook task ID"),
     includeEvents: z.boolean().optional().describe("Include the event timeline"),
   },
   async ({ taskId, includeEvents }) => {
-    const task = await loadCanvasTask(appPaths, taskId, { includeEvents });
+    const task = await loadNotebookTask(appPaths, taskId, { includeEvents });
     return { content: [{ type: "text" as const, text: JSON.stringify(task, null, 2) }] };
   }
 );
 
 server.tool(
-  "canvas_list",
-  "List all persistent canvas tasks.",
+  "notebook_list",
+  "List all persistent notebook tasks.",
   {},
   async () => {
-    const tasks = await listCanvasTasks(appPaths);
+    const tasks = await listNotebookTasks(appPaths);
     const lines = tasks.map((task) => `[${task.status}] ${task.title} (${task.id})`).join("\n");
-    return { content: [{ type: "text" as const, text: lines || "No canvas tasks found." }] };
+    return { content: [{ type: "text" as const, text: lines || "No notebook tasks found." }] };
   }
 );
 
 server.tool(
-  "canvas_open",
-  "Open the canvas UI in the managed browser, optionally focused on a task.",
+  "notebook_open",
+  "Open the notebook UI in the managed browser, optionally focused on a task.",
   {
-    taskId: z.string().optional().describe("Canvas task ID to focus"),
+    taskId: z.string().optional().describe("Notebook task ID to focus"),
   },
   async ({ taskId }) => {
-    const url = await openCanvasWindow(taskId);
-    return { content: [{ type: "text" as const, text: `Opened canvas UI at ${url}` }] };
+    const url = await openNotebookWindow(taskId);
+    return { content: [{ type: "text" as const, text: `Opened notebook UI at ${url}` }] };
   }
 );
 
 // ---- Start server ----
 
 async function main(): Promise<void> {
-  await ensureCanvasStore(appPaths);
+  await ensureNotebookStore(appPaths);
+  await hydrateNotebookTaskBindings();
   bridge.onEvent((message) => {
     const event = message as { event?: string; sessionId?: string; tabId?: number; url?: string; type?: string };
-    if (event.type !== "event" || !event.sessionId) return;
+    const sessionId = event.sessionId;
+    if (event.type !== "event" || !sessionId) return;
     void (async () => {
-      const linked = await findCanvasTaskBySessionId(appPaths, event.sessionId);
+      rememberBrowserContext({ sessionId, tabId: event.tabId });
+      const linked = await findLinkedNotebookTask({ sessionId, tabId: event.tabId });
       if (!linked) return;
-      await appendCanvasEvent(appPaths, linked.meta.id, {
+      await appendNotebookEvent(appPaths, linked.meta.id, {
         type: "browser.event_linked",
         actor: "system",
         payload: event as unknown as Record<string, unknown>,

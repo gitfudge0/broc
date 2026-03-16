@@ -67,6 +67,12 @@ declare namespace browser {
     };
   }
 
+  namespace action {
+    const onClicked: {
+      addListener(cb: (tab: tabs.Tab) => void | Promise<void>): void;
+    };
+  }
+
   namespace tabs {
     interface Tab {
       id?: number;

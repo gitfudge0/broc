@@ -11,6 +11,7 @@ import { createConnection, type Socket } from "net";
 import { existsSync, readFileSync } from "fs";
 import { userInfo } from "os";
 import { createNodeLogger } from "../shared/logger.js";
+import type { OpenNotebookResponse } from "../shared/index.js";
 
 const log = createNodeLogger("bridge-client");
 
@@ -66,6 +67,28 @@ export type BridgeClientErrorCode =
   | "NOT_CONNECTED"
   | "DISCONNECTED"
   | "PING_FAILED";
+
+export async function requestNotebookUrl(options: {
+  socketPath?: string;
+  connectTimeout?: number;
+  timeout?: number;
+  taskId?: string;
+} = {}): Promise<string> {
+  const client = new BridgeClient(options);
+  try {
+    await client.start();
+    const response = await client.request({ type: "open_notebook", taskId: options.taskId }) as OpenNotebookResponse | { type: string; error?: { message?: string } };
+    if (response.type === "error") {
+      throw new Error(response.error?.message || "Failed to resolve notebook URL.");
+    }
+    if (response.type !== "open_notebook_result") {
+      throw new Error(`Unexpected bridge response while resolving notebook URL: ${response.type}`);
+    }
+    return (response as OpenNotebookResponse).url;
+  } finally {
+    client.stop();
+  }
+}
 
 export class BridgeClientError extends Error {
   code: BridgeClientErrorCode;

@@ -297,48 +297,44 @@ All mutating actions return a fresh snapshot after execution.
 - Params: `count?` (default 20), `sessionId?`
 - Max 1,000 entries (circular buffer)
 
-### Canvas Tools
+### Notebook Tools
 
-Canvas tools manage persistent task workspaces stored under Broc's data directory.
+Notebook tools manage persistent task workspaces stored under Broc's data directory.
 
-**`canvas_create`** — Create a new persistent task canvas.
+**`notebook_create`** — Create a new persistent task notebook.
 - Params: `id?`, `title`, `goal?`, `tags?`, `sessionId?`, `tabId?`, `open?`
 
-**`canvas_update`** — Update task metadata.
+**`notebook_update`** — Update task metadata.
 - Params: `taskId`, `title?`, `status?`, `tags?`, `sessionId?`, `tabId?`
 
-**`canvas_set_agent_view`** — Set or merge the agent-only view.
-- Params: `taskId`, `merge?`, `agentView` (JSON string)
+**`notebook_set_view`** — Set or merge the notebook view.
+- Params: `taskId`, `merge?`, `view` (JSON string)
 
-**`canvas_set_user_view`** — Set or merge the user-visible view.
-- Params: `taskId`, `merge?`, `userView` (JSON string)
-
-**`canvas_append_event`** — Add a timeline event.
+**`notebook_append_event`** — Add a timeline event.
 - Params: `taskId`, `type`, `actor?`, `payload?` (JSON string)
 
-**`canvas_add_artifact`** — Persist an artifact.
+**`notebook_add_artifact`** — Persist an artifact.
 - Params: `taskId`, `kind`, `name`, `mimeType?`, `extension?`, `sourcePath?`, `textContent?`, `base64Content?`
 
-**`canvas_get`** — Read a canvas task.
+**`notebook_get`** — Read a notebook task.
 - Params: `taskId`, `includeEvents?`
 
-**`canvas_list`** — List task summaries for the unified canvas UI.
+**`notebook_list`** — List task summaries for the unified notebook UI.
 - No params
 
-**`canvas_open`** — Open the canvas UI in the managed browser.
+**`notebook_open`** — Open the notebook UI in the managed browser.
 - Params: `taskId?`
 
-Canvas persistence layout:
+Notebook persistence layout:
 
-- Linux: `${XDG_DATA_HOME:-~/.local/share}/broc/canvases`
-- macOS: `~/Library/Application Support/broc/canvases`
+- Linux: `${XDG_DATA_HOME:-~/.local/share}/broc/notebooks`
+- macOS: `~/Library/Application Support/broc/notebooks`
 
 Per task:
 
 - `index.json`
 - `tasks/<taskId>/meta.json`
-- `tasks/<taskId>/agent-view.json`
-- `tasks/<taskId>/user-view.json`
+- `tasks/<taskId>/view.json`
 - `tasks/<taskId>/events.ndjson`
 - `tasks/<taskId>/artifacts/*`
 

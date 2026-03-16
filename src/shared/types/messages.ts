@@ -186,6 +186,7 @@ export interface ExtensionStatusResponse extends MessageBase {
   protocolVersion: number;
   capabilities: {
     openTab: boolean;
+    openNotebook: boolean;
   };
 }
 
@@ -200,6 +201,18 @@ export interface OpenTabRequest extends MessageBase {
 export interface OpenTabResponse extends MessageBase {
   type: "open_tab_result";
   tab: TabInfo;
+}
+
+/** Request to resolve a Broc notebook URL */
+export interface OpenNotebookRequest extends MessageBase {
+  type: "open_notebook";
+  taskId?: string;
+}
+
+/** Response containing the resolved notebook URL */
+export interface OpenNotebookResponse extends MessageBase {
+  type: "open_notebook_result";
+  url: string;
 }
 
 
@@ -221,7 +234,8 @@ export type Request =
   | InterruptRequest
   | ListTabsRequest
   | ExtensionStatusRequest
-  | OpenTabRequest;
+  | OpenTabRequest
+  | OpenNotebookRequest;
 
 /** All response message types */
 export type Response =
@@ -231,6 +245,7 @@ export type Response =
   | ListTabsResponse
   | ExtensionStatusResponse
   | OpenTabResponse
+  | OpenNotebookResponse
   | ErrorResponse;
 
 /** Any message that can be sent over the bridge */

@@ -413,10 +413,17 @@ function makeError(
 
 let bridgePort: browser.runtime.Port | null = null;
 let messageQueue: unknown[] = [];
+let nextBridgeRequestId = 1;
+const pendingBridgeRequests = new Map<string, {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}>();
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 const BASE_RECONNECT_DELAY_MS = 1000;
 const MAX_RECONNECT_DELAY_MS = 30000;
+const BRIDGE_REQUEST_TIMEOUT_MS = 5000;
 
 /**
  * Send a message to the native host bridge.
@@ -435,10 +442,50 @@ function sendToBridge(message: Response | PushEvent): void {
   messageQueue.push(message);
 }
 
+function isBridgeResponseMessage(message: unknown): message is { id: string; type: string; sessionId?: string } {
+  if (!message || typeof message !== "object") return false;
+  const value = message as Record<string, unknown>;
+  return typeof value.id === "string" && typeof value.type === "string" && pendingBridgeRequests.has(value.id);
+}
+
+function requestBridge(message: Record<string, unknown>): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    if (!bridgePort) {
+      reject(new Error("Bridge is not connected."));
+      return;
+    }
+
+    const id = `ext_${nextBridgeRequestId++}`;
+    const timer = setTimeout(() => {
+      pendingBridgeRequests.delete(id);
+      reject(new Error(`Bridge request timed out after ${BRIDGE_REQUEST_TIMEOUT_MS}ms.`));
+    }, BRIDGE_REQUEST_TIMEOUT_MS);
+
+    pendingBridgeRequests.set(id, { resolve, reject, timer });
+
+    try {
+      bridgePort.postMessage({ ...message, id, sessionId: "extension" });
+    } catch (error) {
+      clearTimeout(timer);
+      pendingBridgeRequests.delete(id);
+      reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+}
+
 /**
  * Handle incoming messages from the native host bridge.
  */
 async function handleBridgeMessage(message: unknown): Promise<void> {
+  if (isBridgeResponseMessage(message)) {
+    const pending = pendingBridgeRequests.get(message.id);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pendingBridgeRequests.delete(message.id);
+    pending.resolve(message);
+    return;
+  }
+
   const req = message as Request;
 
   if (!req || !req.type || !req.id) {
@@ -495,6 +542,11 @@ function connectBridge(): void {
     bridgePort.onDisconnect.addListener(() => {
       log.info("Bridge disconnected");
       bridgePort = null;
+      for (const [id, pending] of pendingBridgeRequests) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error("Bridge disconnected."));
+        pendingBridgeRequests.delete(id);
+      }
 
       if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
         // Exponential backoff with jitter
@@ -674,6 +726,32 @@ function mapTransitionType(type?: string): "new" | "reload" | "back_forward" | "
 }
 
 // Tab events
+browser.action.onClicked.addListener(async () => {
+  try {
+    if (!bridgePort) {
+      throw new Error("Broc runtime is not connected. Launch Broc first.");
+    }
+
+    const response = await requestBridge({ type: "open_notebook" }) as { type: string; url?: string; error?: { message?: string } };
+
+    if (response.type === "open_notebook_result" && typeof response.url === "string") {
+      await browser.tabs.create({ url: response.url, active: true });
+      return;
+    }
+
+    await browser.tabs.create({
+      url: `data:text/plain,${encodeURIComponent(response.error?.message || "Could not open the notebook.")}`,
+      active: true,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await browser.tabs.create({
+      url: `data:text/plain,${encodeURIComponent(message)}`,
+      active: true,
+    });
+  }
+});
+
 browser.tabs.onActivated.addListener((activeInfo) => {
   const event: PushEvent = {
     type: "event",

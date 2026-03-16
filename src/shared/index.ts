@@ -54,6 +54,8 @@ export type {
   ExtensionStatusResponse,
   OpenTabRequest,
   OpenTabResponse,
+  OpenNotebookRequest,
+  OpenNotebookResponse,
   TabInfo,
   Request,
   Response,

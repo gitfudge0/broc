@@ -110,7 +110,7 @@ async function copyStatic() {
   // Native host manifest template (shared — used by CLI install command)
   await cp("src/bridge/broc.json", "dist/broc.json");
   await ensureDir("dist/ui");
-  await cp("src/ui/canvas.html", "dist/ui/canvas.html");
+  await cp("src/ui/notebook.html", "dist/ui/notebook.html");
 }
 
 /**
@@ -189,7 +189,7 @@ async function buildNode() {
   await chmod("dist/cli.mjs", 0o755);
 }
 
-async function buildCanvasUi() {
+async function buildNotebookUi() {
   const shared = {
     bundle: true,
     sourcemap: true,
@@ -200,8 +200,8 @@ async function buildCanvasUi() {
 
   const chromeBuild = esbuild.build({
     ...shared,
-    entryPoints: ["src/ui/canvas.ts"],
-    outfile: "dist/ui/canvas.js",
+    entryPoints: ["src/ui/notebook.ts"],
+    outfile: "dist/ui/notebook.js",
   });
 
   await chromeBuild;
@@ -262,14 +262,14 @@ if (watch) {
     banner: { js: "#!/usr/bin/env node" },
     external: cliExternals,
   });
-  const canvasChromeCtx = await esbuild.context({
+  const notebookChromeCtx = await esbuild.context({
     bundle: true,
     sourcemap: true,
     format: "esm",
     target: "chrome130",
     logLevel: "info",
-    entryPoints: ["src/ui/canvas.ts"],
-    outfile: "dist/ui/canvas.js",
+    entryPoints: ["src/ui/notebook.ts"],
+    outfile: "dist/ui/notebook.js",
   });
 
   await copyStatic();
@@ -277,7 +277,7 @@ if (watch) {
     fxBgCtx.watch(), fxContentCtx.watch(),
     crBgCtx.watch(), crContentCtx.watch(),
     bridgeCtx.watch(), mcpCtx.watch(), cliCtx.watch(),
-    canvasChromeCtx.watch(),
+    notebookChromeCtx.watch(),
   ]);
   console.log("Watching for changes (Firefox + Chrome)...");
 } else {
@@ -291,7 +291,7 @@ if (watch) {
   const firefoxBuild = runtimeOnly ? Promise.resolve() : buildExtension("firefox", firefoxExtension);
   const chromeBuild = buildExtension("chrome", chromeExtension, chromeBanner);
   const nodeBuild = buildNode();
-  const uiBuild = buildCanvasUi();
+  const uiBuild = buildNotebookUi();
 
   await Promise.all([firefoxBuild, chromeBuild, nodeBuild, uiBuild]);
 }

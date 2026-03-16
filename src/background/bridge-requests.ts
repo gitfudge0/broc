@@ -2,6 +2,8 @@ import type {
   ErrorResponse,
   ExtensionStatusRequest,
   ExtensionStatusResponse,
+  OpenNotebookRequest,
+  OpenNotebookResponse,
   OpenTabRequest,
   OpenTabResponse,
   TabInfo,
@@ -21,6 +23,10 @@ export interface OpenTabRequestDeps {
 
 export interface ExtensionStatusDeps {
   getManifestVersion: () => string;
+}
+
+export interface OpenNotebookRequestDeps {
+  getNotebookUrl: (taskId?: string) => Promise<string>;
 }
 
 export function makeProtocolError(
@@ -76,6 +82,26 @@ export async function handleOpenTabRequest(
   }
 }
 
+export async function handleOpenNotebookRequest(
+  req: OpenNotebookRequest,
+  deps: OpenNotebookRequestDeps,
+): Promise<OpenNotebookResponse | ErrorResponse> {
+  try {
+    return {
+      type: "open_notebook_result",
+      id: req.id,
+      sessionId: req.sessionId,
+      url: await deps.getNotebookUrl(req.taskId),
+    };
+  } catch (error) {
+    return makeProtocolError(
+      req,
+      "internal_error",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
 export function handleExtensionStatusRequest(
   req: ExtensionStatusRequest,
   deps: ExtensionStatusDeps,
@@ -85,9 +111,10 @@ export function handleExtensionStatusRequest(
     id: req.id,
     sessionId: req.sessionId,
     extensionVersion: deps.getManifestVersion(),
-    protocolVersion: 2,
-    capabilities: {
-      openTab: true,
-    },
-  };
+      protocolVersion: 2,
+      capabilities: {
+        openTab: true,
+        openNotebook: true,
+      },
+    };
 }

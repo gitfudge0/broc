@@ -103,6 +103,7 @@ const VALID_REQUEST_TYPES = new Set([
   "list_tabs",
   "extension_status",
   "open_tab",
+  "open_notebook",
   "interrupt",
   "ping",
 ]);
@@ -113,6 +114,7 @@ const VALID_RESPONSE_TYPES = new Set([
   "list_tabs_result",
   "extension_status_result",
   "open_tab_result",
+  "open_notebook_result",
   "interrupt_result",
   "error",
   "event",
