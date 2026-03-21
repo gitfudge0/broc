@@ -7,8 +7,12 @@ describe("package.json scripts", () => {
       "dev",
       "dev:build",
       "dev:launch",
+      "dev:notebook",
+      "dev:notebook:build",
+      "dev:notebook:serve",
       "test",
       "build",
+      "build:notebook",
       "build:runtime",
       "clean",
       "install:local",
@@ -30,5 +34,14 @@ describe("package.json scripts", () => {
     expect(pkg.scripts["dev:launch"]).toContain("nodemon");
     expect(pkg.scripts["dev:launch"]).toContain("--watch dist/mcp-server.mjs");
     expect(pkg.scripts["dev:launch"]).toContain("--exec \"npm run launch -- --browser=chrome\"");
+  });
+
+  it("exposes a notebook-only dev loop", () => {
+    expect(pkg.scripts["build:notebook"]).toContain("node build.mjs --notebook");
+    expect(pkg.scripts["dev:notebook:build"]).toContain("node build.mjs --watch --notebook");
+    expect(pkg.scripts["dev:notebook:serve"]).toContain("wait-on dist/notebook-server.mjs");
+    expect(pkg.scripts["dev:notebook:serve"]).toContain("node dist/notebook-server.mjs");
+    expect(pkg.scripts["dev:notebook"]).toContain("npm:dev:notebook:build");
+    expect(pkg.scripts["dev:notebook"]).toContain("npm:dev:notebook:serve");
   });
 });

@@ -14,10 +14,7 @@ export function sidebar({ tasks, selectedTaskId }: SidebarProps): string {
   const brand = `
     <div class="sidebar-brand sidebar-expanded-only">
       <div class="sidebar-brand__row">
-        <div>
-          <h1 class="sidebar-brand__title">Notebook</h1>
-          <p class="sidebar-brand__subtitle">Task workspaces</p>
-        </div>
+        <h1 class="sidebar-brand__title">Notebook</h1>
         <div class="sidebar-brand__actions">
           ${themeToggle()}
           <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" title="Collapse sidebar" aria-label="Collapse sidebar">
@@ -64,25 +61,21 @@ export const sidebarCSS = /* css */ `
 }
 .sidebar-brand__row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
 }
 .sidebar-brand__title {
   font-family: var(--font-display);
-  font-size: 20px;
+  font-size: 15px;
   font-weight: 800;
   letter-spacing: -0.02em;
-}
-.sidebar-brand__subtitle {
-  font-family: var(--font-display);
-  font-size: 12px;
-  color: var(--text-muted);
-  margin-top: var(--sp-1);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 .sidebar-brand__actions {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  gap: var(--sp-1);
 }
 .sidebar-collapse-btn,
 .sidebar-expand-btn {
@@ -104,7 +97,7 @@ export const sidebarCSS = /* css */ `
 .sidebar-list {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
+  gap: 0;
   min-width: 0;
 }
 
@@ -115,7 +108,7 @@ export const sidebarCSS = /* css */ `
 
 /* -- Collapsed state (toggled via .shell--collapsed on .shell) -- */
 .shell--collapsed {
-  grid-template-columns: 76px minmax(0, 1fr);
+  grid-template-columns: 56px minmax(0, 1fr);
 }
 .shell--collapsed .shell__sidebar {
   padding: var(--sp-3);

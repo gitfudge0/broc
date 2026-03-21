@@ -31,17 +31,17 @@ export const highlightStripCSS = /* css */ `
 .hl-strip {
   display: flex;
   gap: 0;
-  padding: var(--sp-5) 0;
+  padding: var(--sp-4) 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  margin-bottom: var(--sp-7);
+  margin-bottom: var(--sp-6);
   overflow-x: auto;
 }
 
 .hl-strip__item {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
+  gap: 2px;
   padding: 0 var(--sp-6);
   border-right: 1px solid var(--border);
   min-width: 0;
@@ -57,23 +57,24 @@ export const highlightStripCSS = /* css */ `
 }
 
 .hl-strip__label {
-  font-family: var(--font-display);
-  font-size: 11px;
-  font-weight: 600;
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   color: var(--text-muted);
 }
 
 .hl-strip__value {
-  font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 700;
+  font-family: var(--font-body);
+  font-size: 18px;
+  font-weight: 800;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 200px;
+  letter-spacing: -0.02em;
 }
 
 @media (max-width: 900px) {
@@ -88,11 +89,6 @@ export const highlightStripCSS = /* css */ `
     border-bottom: 1px solid var(--border);
     padding-bottom: var(--sp-3);
   }
-  .hl-strip__item:last-child,
-  .hl-strip__item:nth-last-child(2):nth-child(odd) ~ .hl-strip__item:last-child {
-    border-bottom: none;
-  }
-  /* If odd number of items, last row single item has no bottom border */
   .hl-strip__item:last-child {
     border-bottom: none;
   }

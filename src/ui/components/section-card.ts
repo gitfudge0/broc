@@ -230,30 +230,31 @@ export const sectionCardCSS = /* css */ `
 }
 
 .sc {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 90%, white 10%), var(--surface));
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--sp-6);
-  box-shadow: var(--shadow-card);
 }
 
 .sc__topline {
   font-size: 11px;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.08em;
   color: var(--text-muted);
   margin-bottom: var(--sp-2);
 }
 
 .sc__title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   margin-bottom: var(--sp-4);
+  color: var(--text-primary);
 }
 
 .sc__text,
 .sc__markdown {
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.65;
   color: var(--text-secondary);
   white-space: pre-wrap;
@@ -276,7 +277,7 @@ export const sectionCardCSS = /* css */ `
 
 .sc__facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: var(--sp-3);
   margin: 0;
 }
@@ -290,8 +291,9 @@ export const sectionCardCSS = /* css */ `
 
 .sc__fact dt {
   font-size: 11px;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   color: var(--text-muted);
   margin-bottom: var(--sp-1);
 }
@@ -299,7 +301,8 @@ export const sectionCardCSS = /* css */ `
 .sc__fact dd {
   margin: 0;
   color: var(--text-primary);
-  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 14px;
 }
 
 .sc__list {
@@ -324,21 +327,26 @@ export const sectionCardCSS = /* css */ `
 }
 
 .sc__check-mark {
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1.5px solid var(--border-strong);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--accent);
-  font-size: 12px;
+  font-size: 11px;
   flex-shrink: 0;
+}
+
+.sc__check-label {
+  font-size: 14px;
+  color: var(--text-primary);
 }
 
 .sc__metrics {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: var(--sp-3);
 }
 
@@ -352,29 +360,37 @@ export const sectionCardCSS = /* css */ `
 .sc__metric-label {
   display: block;
   font-size: 11px;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   color: var(--text-muted);
 }
 
 .sc__metric-value {
   display: block;
-  font-family: var(--font-display);
-  font-size: 20px;
+  font-size: 22px;
+  font-weight: 800;
   color: var(--text-primary);
-  margin-top: var(--sp-2);
+  margin-top: var(--sp-1);
+  letter-spacing: -0.02em;
 }
 
 .sc__link {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: var(--sp-3);
   text-decoration: none;
   padding: var(--sp-3) var(--sp-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   color: var(--text-primary);
-  background: var(--surface-muted);
+  transition: background 0.12s;
+}
+
+.sc__link:hover {
+  background: var(--surface-hover);
+  text-decoration: none;
 }
 
 .sc__link-url {
@@ -389,7 +405,6 @@ export const sectionCardCSS = /* css */ `
 .sc__table {
   width: 100%;
   border-collapse: collapse;
-  font-family: var(--font-display);
   font-size: 13px;
 }
 
@@ -403,7 +418,7 @@ export const sectionCardCSS = /* css */ `
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   font-size: 11px;
 }
 
@@ -419,11 +434,17 @@ export const sectionCardCSS = /* css */ `
 }
 
 .sc__pre--diff .sc__diff-line--add {
-  color: #24663b;
+  color: #16a34a;
+}
+[data-theme="dark"] .sc__pre--diff .sc__diff-line--add {
+  color: #4ade80;
 }
 
 .sc__pre--diff .sc__diff-line--remove {
-  color: #7d2230;
+  color: #dc2626;
+}
+[data-theme="dark"] .sc__pre--diff .sc__diff-line--remove {
+  color: #ef4444;
 }
 
 .sc__media-grid {
@@ -451,8 +472,8 @@ export const sectionCardCSS = /* css */ `
 .sc__callout {
   padding: var(--sp-4);
   border-radius: var(--radius-md);
-  border: 1px dashed var(--border);
+  border: 1px dashed var(--border-strong);
   color: var(--text-muted);
-  background: var(--surface-muted);
+  font-size: 13px;
 }
 `;

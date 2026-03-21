@@ -8,6 +8,8 @@ export interface ArtifactData {
   mimeType?: string;
   size: number;
   createdAt: string;
+  href?: string;
+  thumbnailSrc?: string;
 }
 
 export interface ArtifactGalleryProps {
@@ -26,6 +28,10 @@ function artifactUrl(taskId: string, artifactId: string, apiBase: string): strin
   return `${apiBase}/task/${encodeURIComponent(taskId)}/artifact/${encodeURIComponent(artifactId)}`;
 }
 
+function resolveArtifactHref(artifact: ArtifactData, taskId: string, apiBase: string): string {
+  return artifact.href || artifactUrl(taskId, artifact.id, apiBase);
+}
+
 export function artifactGallery({ artifacts, taskId, apiBase }: ArtifactGalleryProps): string {
   if (!artifacts || artifacts.length === 0) {
     return emptyState({ message: "No artifacts yet", hint: "Screenshots and files appear here." });
@@ -35,16 +41,17 @@ export function artifactGallery({ artifacts, taskId, apiBase }: ArtifactGalleryP
   const files = artifacts.filter((a) => !isImage(a));
 
   const imageThumbs = images.map((a) => {
-    const url = artifactUrl(taskId, a.id, apiBase);
+    const url = resolveArtifactHref(a, taskId, apiBase);
+    const src = a.thumbnailSrc || url;
     return `
       <a class="ag-thumb" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(a.name)}">
-        <img class="ag-thumb__img" src="${escapeHtml(url)}" alt="${escapeHtml(a.name)}" loading="lazy" />
+        <img class="ag-thumb__img" src="${escapeHtml(src)}" alt="${escapeHtml(a.name)}" loading="lazy" />
       </a>
     `;
   }).join("");
 
   const fileCards = files.map((a) => {
-    const url = artifactUrl(taskId, a.id, apiBase);
+    const url = resolveArtifactHref(a, taskId, apiBase);
     return `
       <a class="ag-file" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">
         <span class="ag-file__icon">

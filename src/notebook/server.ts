@@ -16,14 +16,26 @@ interface NotebookServerState {
   readyPromise: Promise<number> | null;
 }
 
-const serverStates = new Map<string, NotebookServerState>();
-
-function getStateKey(appPaths: AppPaths, repoPaths: RepoPaths): string {
-  return `${appPaths.dataDir}::${repoPaths.distDir}`;
+interface NotebookServerParams {
+  appPaths: AppPaths;
+  repoPaths: RepoPaths;
 }
 
-function getState(appPaths: AppPaths, repoPaths: RepoPaths): NotebookServerState {
-  const key = getStateKey(appPaths, repoPaths);
+interface NotebookServerListenOptions extends NotebookServerParams {
+  host?: string;
+  port?: number;
+  stateKey?: string;
+}
+
+const serverStates = new Map<string, NotebookServerState>();
+const DEFAULT_NOTEBOOK_HOST = "127.0.0.1";
+
+function getStateKey(appPaths: AppPaths, repoPaths: RepoPaths, stateKey = "default"): string {
+  return `${appPaths.dataDir}::${repoPaths.distDir}::${stateKey}`;
+}
+
+function getState(appPaths: AppPaths, repoPaths: RepoPaths, stateKey?: string): NotebookServerState {
+  const key = getStateKey(appPaths, repoPaths, stateKey);
   let state = serverStates.get(key);
   if (!state) {
     state = {
@@ -34,6 +46,12 @@ function getState(appPaths: AppPaths, repoPaths: RepoPaths): NotebookServerState
     serverStates.set(key, state);
   }
   return state;
+}
+
+function buildNotebookUrl(port: number, taskId?: string, host = DEFAULT_NOTEBOOK_HOST): string {
+  return taskId
+    ? `http://${host}:${port}/notebook.html?task=${encodeURIComponent(taskId)}`
+    : `http://${host}:${port}/notebook.html`;
 }
 
 function okJson(res: ServerResponse, body: unknown): void {
@@ -128,13 +146,31 @@ async function notebookApiHandler(
 }
 
 export async function ensureNotebookServer(params: { appPaths: AppPaths; repoPaths: RepoPaths }): Promise<number> {
-  const state = getState(params.appPaths, params.repoPaths);
+  const { port } = await startNotebookServer({ ...params, stateKey: "embedded" });
+  return port;
+}
+
+export async function startNotebookServer(params: NotebookServerListenOptions): Promise<{
+  port: number;
+  server: ReturnType<typeof createServer>;
+}> {
+  const host = params.host ?? DEFAULT_NOTEBOOK_HOST;
+  const listenPort = params.port ?? 0;
+  const stateKey = params.stateKey ?? `${host}:${listenPort || "ephemeral"}`;
+  const state = getState(params.appPaths, params.repoPaths, stateKey);
   if (state.port !== null) {
-    return state.port;
+    if (!state.server) {
+      throw new Error("Notebook server state is inconsistent.");
+    }
+    return { port: state.port, server: state.server };
   }
 
   if (state.readyPromise) {
-    return state.readyPromise;
+    const port = await state.readyPromise;
+    if (!state.server) {
+      throw new Error("Notebook server did not initialize correctly.");
+    }
+    return { port, server: state.server };
   }
 
   state.readyPromise = new Promise<number>((resolvePromise, rejectPromise) => {
@@ -148,13 +184,23 @@ export async function ensureNotebookServer(params: { appPaths: AppPaths; repoPat
     });
 
     server.once("error", (error) => {
+      state.server = null;
+      state.port = null;
       state.readyPromise = null;
       rejectPromise(error);
+    });
+
+    server.once("close", () => {
+      state.server = null;
+      state.port = null;
+      state.readyPromise = null;
     });
 
     server.once("listening", () => {
       const address = server.address();
       if (!address || typeof address === "string") {
+        state.server = null;
+        state.port = null;
         state.readyPromise = null;
         rejectPromise(new Error("Notebook server did not expose a TCP port."));
         return;
@@ -164,10 +210,35 @@ export async function ensureNotebookServer(params: { appPaths: AppPaths; repoPat
       resolvePromise(address.port);
     });
 
-    server.listen(0, "127.0.0.1");
+    server.listen(listenPort, host);
   });
 
-  return state.readyPromise;
+  const port = await state.readyPromise;
+  if (!state.server) {
+    throw new Error("Notebook server did not initialize correctly.");
+  }
+  return { port, server: state.server };
+}
+
+export async function closeNotebookServer(params: NotebookServerListenOptions): Promise<void> {
+  const host = params.host ?? DEFAULT_NOTEBOOK_HOST;
+  const listenPort = params.port ?? 0;
+  const stateKey = params.stateKey ?? `${host}:${listenPort || "ephemeral"}`;
+  const state = getState(params.appPaths, params.repoPaths, stateKey);
+  if (!state.server) {
+    return;
+  }
+
+  const server = state.server;
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    server.close((error) => {
+      if (error) {
+        rejectPromise(error);
+        return;
+      }
+      resolvePromise();
+    });
+  });
 }
 
 export async function getNotebookUrl(params: {
@@ -176,7 +247,13 @@ export async function getNotebookUrl(params: {
   taskId?: string;
 }): Promise<string> {
   const port = await ensureNotebookServer(params);
-  return params.taskId
-    ? `http://127.0.0.1:${port}/notebook.html?task=${encodeURIComponent(params.taskId)}`
-    : `http://127.0.0.1:${port}/notebook.html`;
+  return buildNotebookUrl(port, params.taskId);
+}
+
+export function getStandaloneNotebookUrl(params: {
+  port: number;
+  taskId?: string;
+  host?: string;
+}): string {
+  return buildNotebookUrl(params.port, params.taskId, params.host);
 }

@@ -21,6 +21,7 @@ import { tagPillCSS } from "./components/tag-pill";
 import { emptyState, emptyStateCSS } from "./components/empty-state";
 import { paginationCSS } from "./components/pagination";
 import { themeToggleCSS, bindThemeToggle } from "./components/theme-toggle";
+import { createShowcaseTask, createShowcaseTaskSummary, SHOWCASE_TASK_ID } from "./showcase";
 
 type NotebookTaskStatus = "pending" | "running" | "waiting" | "blocked" | "completed" | "failed" | "archived";
 
@@ -32,6 +33,8 @@ interface NotebookTaskSummary {
   createdAt: string;
   tags?: string[];
   summary?: string;
+  pinned?: boolean;
+  deletable?: boolean;
 }
 
 interface NotebookSection {
@@ -57,7 +60,7 @@ interface NotebookTaskRecord {
     updatedAt: string;
     createdAt: string;
     tags?: string[];
-    artifacts: Array<{ id: string; name: string; kind: string; mimeType?: string; size: number; createdAt: string }>;
+    artifacts: Array<{ id: string; name: string; kind: string; mimeType?: string; size: number; createdAt: string; href?: string; thumbnailSrc?: string }>;
   };
   view: NotebookView;
   events?: Array<{ id: string; type: string; createdAt: string; actor: string; payload: Record<string, unknown> }>;
@@ -108,41 +111,50 @@ const mainContentCSS = /* css */ `
 .content-body {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-7);
+  gap: var(--sp-6);
 }
 
 .content-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
 }
 
 .content-action {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-4);
-  border-radius: var(--radius-md);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   text-decoration: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.content-action:hover {
+  border-color: var(--border-strong);
   color: var(--text-primary);
-  background: var(--surface-muted);
 }
 
 .content-timeline {
-  margin-top: var(--sp-7);
-  padding-top: var(--sp-5);
+  margin-top: var(--sp-6);
+  padding-top: var(--sp-4);
   border-top: 1px solid var(--border);
 }
 
 .content-timeline__header {
-  font-family: var(--font-display);
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
   padding-bottom: var(--sp-3);
   margin-bottom: var(--sp-3);
-  border-bottom: 1px solid var(--border);
 }
 `;
 
@@ -278,6 +290,14 @@ function renderMainContent(task: NotebookTaskRecord | null): string {
   `;
 }
 
+function withShowcaseTask(tasks: NotebookTaskSummary[]): NotebookTaskSummary[] {
+  return [createShowcaseTaskSummary(), ...tasks.filter((task) => task.id !== SHOWCASE_TASK_ID)];
+}
+
+function isShowcaseTask(taskId: string | null): boolean {
+  return taskId === SHOWCASE_TASK_ID;
+}
+
 function bindInteractions(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-task-id]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -294,7 +314,7 @@ function bindInteractions(): void {
     button.addEventListener("click", async (e) => {
       e.stopPropagation();
       const taskId = button.dataset.deleteTaskId;
-      if (!taskId) return;
+      if (!taskId || isShowcaseTask(taskId)) return;
       try {
         const resp = await fetch(`${API_BASE}/task/${encodeURIComponent(taskId)}`, { method: "DELETE", credentials: "same-origin" });
         if (!resp.ok) throw new Error(`Delete failed: ${resp.status}`);
@@ -368,17 +388,21 @@ function render(payload: NotebookPayload): void {
 async function load(): Promise<void> {
   const search = new URLSearchParams(window.location.search);
   const selectedTaskId = search.get("task");
-  const tasks = await requestJson<NotebookTaskSummary[]>(`${API_BASE}/tasks`);
+  const tasks = withShowcaseTask(await requestJson<NotebookTaskSummary[]>(`${API_BASE}/tasks`));
   const resolvedTaskId = selectedTaskId || tasks[0]?.id || null;
 
   let selectedTask: NotebookTaskRecord | null = null;
   if (resolvedTaskId) {
-    try {
-      selectedTask = await requestJson<NotebookTaskRecord>(
-        `${API_BASE}/task/${encodeURIComponent(resolvedTaskId)}?events=1`,
-      );
-    } catch (e) {
-      console.error("Failed to load task", e);
+    if (isShowcaseTask(resolvedTaskId)) {
+      selectedTask = createShowcaseTask();
+    } else {
+      try {
+        selectedTask = await requestJson<NotebookTaskRecord>(
+          `${API_BASE}/task/${encodeURIComponent(resolvedTaskId)}?events=1`,
+        );
+      } catch (e) {
+        console.error("Failed to load task", e);
+      }
     }
   }
 

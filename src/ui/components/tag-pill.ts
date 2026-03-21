@@ -17,19 +17,20 @@ export const tagPillCSS = /* css */ `
 .tag-pill {
   display: inline-flex;
   align-items: center;
-  font-family: var(--font-display);
-  font-size: 11px;
+  font-family: var(--font-body);
+  font-size: 10px;
   font-weight: 500;
-  padding: 3px 10px;
+  padding: 2px 8px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--border-strong);
-  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
   white-space: nowrap;
   line-height: 1.4;
+  letter-spacing: 0.02em;
 }
 .tag-list {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--sp-2);
+  gap: 6px;
 }
 `;

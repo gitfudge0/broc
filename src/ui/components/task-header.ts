@@ -15,15 +15,10 @@ export function taskHeader({ title, summary, status, createdAt, updatedAt, tags 
   return `
     <header class="task-header">
       <div class="task-header__top">
-        <div class="task-header__meta-left">
-          <div class="task-header__meta-item">
-            <span class="eyebrow">Created</span>
-            <span class="task-header__meta-value">${escapeHtml(formatDateTime(createdAt))}</span>
-          </div>
-          <div class="task-header__meta-item">
-            <span class="eyebrow">Updated</span>
-            <span class="task-header__meta-value">${escapeHtml(formatDate(updatedAt))}</span>
-          </div>
+        <div class="task-header__meta-row">
+          <span class="task-header__meta-value">${escapeHtml(formatDateTime(createdAt))}</span>
+          <span class="task-header__meta-sep">&middot;</span>
+          <span class="task-header__meta-value">${escapeHtml(formatDate(updatedAt))}</span>
         </div>
         ${statusBadge({ status })}
       </div>
@@ -46,40 +41,40 @@ export const taskHeaderCSS = /* css */ `
 
 .task-header__top {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   margin-bottom: var(--sp-5);
 }
 
-.task-header__meta-left {
+.task-header__meta-row {
   display: flex;
-  gap: var(--sp-7);
-}
-
-.task-header__meta-item {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
+  align-items: center;
+  gap: var(--sp-2);
 }
 
 .task-header__meta-value {
-  font-family: var(--font-display);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.task-header__meta-sep {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .task-header__title {
-  font-size: clamp(28px, 4vw, 42px);
-  font-weight: 800;
-  letter-spacing: -0.025em;
-  line-height: 1.08;
-  max-width: 18ch;
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 900;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+  max-width: 16ch;
   margin-bottom: var(--sp-4);
+  color: var(--text-primary);
 }
 
 .task-header__summary {
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1.6;
   color: var(--text-secondary);
   max-width: 55ch;
@@ -95,6 +90,7 @@ export const taskHeaderCSS = /* css */ `
   }
   .task-header__top {
     flex-direction: column;
+    align-items: flex-start;
     gap: var(--sp-3);
   }
 }

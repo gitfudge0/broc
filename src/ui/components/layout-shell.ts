@@ -1,6 +1,6 @@
 /**
  * The top-level shell: sidebar (task list) + main content area.
- * Magazine-style asymmetric layout.
+ * Clean two-column layout with solid sidebar background.
  */
 
 export interface LayoutShellProps {
@@ -20,7 +20,7 @@ export function layoutShell({ sidebar, main }: LayoutShellProps): string {
 export const layoutShellCSS = /* css */ `
 .shell {
   display: grid;
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
   align-items: start;
   min-height: 100vh;
 }
@@ -32,17 +32,16 @@ export const layoutShellCSS = /* css */ `
   overflow-y: auto;
   border-right: 1px solid var(--border);
   background: var(--sidebar-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  padding: var(--sp-6);
+  padding: var(--sp-5);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-6);
+  gap: var(--sp-4);
   min-width: 0;
 }
 
 .shell__main {
   padding: var(--sp-8) var(--sp-8) var(--sp-9);
+  max-width: 820px;
   min-width: 0;
 }
 

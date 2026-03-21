@@ -28,21 +28,21 @@ export const emptyStateCSS = /* css */ `
   justify-content: center;
   padding: var(--sp-9) var(--sp-7);
   text-align: center;
-  min-height: 200px;
+  min-height: 180px;
 }
 .empty-state__icon {
   color: var(--text-muted);
-  margin-bottom: var(--sp-4);
-  opacity: 0.5;
+  margin-bottom: var(--sp-3);
+  opacity: 0.3;
 }
 .empty-state__message {
-  font-family: var(--font-display);
-  font-size: 15px;
+  font-family: var(--font-body);
+  font-size: 14px;
   font-weight: 500;
   color: var(--text-secondary);
 }
 .empty-state__hint {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-muted);
   margin-top: var(--sp-2);
 }

@@ -53,15 +53,16 @@ export const themeToggleCSS = /* css */ `
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
   border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  transition: background 0.15s, color 0.15s;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  transition: color 0.15s, border-color 0.15s;
 }
 .theme-toggle:hover {
-  background: var(--surface-hover);
   color: var(--text-primary);
+  border-color: var(--border);
 }
 
 /* Show sun in dark mode, moon in light mode */

@@ -1,9 +1,10 @@
 import * as esbuild from "esbuild";
 import { cp, mkdir, chmod, readFile, writeFile } from "fs/promises";
-import { existsSync } from "fs";
+import { existsSync, watch as watchFs } from "fs";
 
 const watch = process.argv.includes("--watch");
 const runtimeOnly = process.argv.includes("--runtime");
+const notebookOnly = process.argv.includes("--notebook");
 const EXTENSION_BUILD_STATE_PATH = "dist/.extension-build.json";
 
 // ---- Browser-specific extension configs ----
@@ -109,8 +110,29 @@ async function copyStatic() {
 
   // Native host manifest template (shared — used by CLI install command)
   await cp("src/bridge/broc.json", "dist/broc.json");
+  await copyNotebookStatic();
+}
+
+async function copyNotebookStatic() {
   await ensureDir("dist/ui");
   await cp("src/ui/notebook.html", "dist/ui/notebook.html");
+}
+
+function watchNotebookStatic() {
+  const watcher = watchFs("src/ui/notebook.html", async () => {
+    try {
+      await copyNotebookStatic();
+      console.log("Copied notebook.html");
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  watcher.on("error", (error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+  });
+
+  return watcher;
 }
 
 /**
@@ -207,62 +229,21 @@ async function buildNotebookUi() {
   await chromeBuild;
 }
 
-// ---- Main ----
-
-if (watch) {
-  // Watch mode: build both browsers and node, then watch for changes
-  // For watch mode, we rebuild both browsers on every change
-  const polyfillBanner = await getChromePolyfillBanner();
-  const chromeBanner = { js: polyfillBanner };
-
-  // Firefox watch contexts
-  const fxBgCtx = await esbuild.context({
-    ...firefoxExtension,
-    entryPoints: ["src/background/index.ts"],
-    outfile: "dist/firefox/background.js",
-  });
-  const fxContentCtx = await esbuild.context({
-    ...firefoxExtension,
-    entryPoints: ["src/content/index.ts"],
-    outfile: "dist/firefox/content.js",
-  });
-
-  // Chrome watch contexts
-  const crBgCtx = await esbuild.context({
-    ...chromeExtension,
-    entryPoints: ["src/background/index.ts"],
-    outfile: "dist/chrome/background.js",
-    banner: chromeBanner,
-  });
-  const crContentCtx = await esbuild.context({
-    ...chromeExtension,
-    entryPoints: ["src/content/index.ts"],
-    outfile: "dist/chrome/content.js",
-    banner: chromeBanner,
-  });
-
-  // Node watch contexts
-  const bridgeCtx = await esbuild.context({
+async function buildNotebookServer() {
+  const serverBuild = esbuild.build({
     ...sharedNode,
-    entryPoints: ["src/bridge/host.ts"],
-    outfile: "dist/bridge.mjs",
-    banner: { js: "#!/usr/bin/env node" },
-  });
-  const mcpCtx = await esbuild.context({
-    ...sharedNode,
-    entryPoints: ["src/mcp/server.ts"],
-    outfile: "dist/mcp-server.mjs",
-    banner: { js: "#!/usr/bin/env node" },
-    external: mcpServerExternals,
-  });
-  const cliCtx = await esbuild.context({
-    ...sharedNode,
-    entryPoints: ["src/cli.ts"],
-    outfile: "dist/cli.mjs",
+    entryPoints: ["src/notebook/dev-server.ts"],
+    outfile: "dist/notebook-server.mjs",
     banner: { js: "#!/usr/bin/env node" },
     external: cliExternals,
   });
-  const notebookChromeCtx = await esbuild.context({
+
+  await serverBuild;
+  await chmod("dist/notebook-server.mjs", 0o755);
+}
+
+async function createNotebookUiWatchContext() {
+  return esbuild.context({
     bundle: true,
     sourcemap: true,
     format: "esm",
@@ -271,16 +252,105 @@ if (watch) {
     entryPoints: ["src/ui/notebook.ts"],
     outfile: "dist/ui/notebook.js",
   });
+}
 
-  await copyStatic();
-  await Promise.all([
-    fxBgCtx.watch(), fxContentCtx.watch(),
-    crBgCtx.watch(), crContentCtx.watch(),
-    bridgeCtx.watch(), mcpCtx.watch(), cliCtx.watch(),
-    notebookChromeCtx.watch(),
-  ]);
-  console.log("Watching for changes (Firefox + Chrome)...");
-} else {
+async function createNotebookServerWatchContext() {
+  return esbuild.context({
+    ...sharedNode,
+    entryPoints: ["src/notebook/dev-server.ts"],
+    outfile: "dist/notebook-server.mjs",
+    banner: { js: "#!/usr/bin/env node" },
+    external: cliExternals,
+  });
+}
+
+// ---- Main ----
+
+async function main() {
+  if (watch) {
+    if (notebookOnly) {
+      const notebookUiCtx = await createNotebookUiWatchContext();
+      const notebookServerCtx = await createNotebookServerWatchContext();
+
+      await copyNotebookStatic();
+      watchNotebookStatic();
+      await Promise.all([notebookUiCtx.watch(), notebookServerCtx.watch()]);
+      console.log("Watching notebook dev assets...");
+      return;
+    }
+
+    // Watch mode: build both browsers and node, then watch for changes
+    // For watch mode, we rebuild both browsers on every change
+    const polyfillBanner = await getChromePolyfillBanner();
+    const chromeBanner = { js: polyfillBanner };
+
+    // Firefox watch contexts
+    const fxBgCtx = await esbuild.context({
+      ...firefoxExtension,
+      entryPoints: ["src/background/index.ts"],
+      outfile: "dist/firefox/background.js",
+    });
+    const fxContentCtx = await esbuild.context({
+      ...firefoxExtension,
+      entryPoints: ["src/content/index.ts"],
+      outfile: "dist/firefox/content.js",
+    });
+
+    // Chrome watch contexts
+    const crBgCtx = await esbuild.context({
+      ...chromeExtension,
+      entryPoints: ["src/background/index.ts"],
+      outfile: "dist/chrome/background.js",
+      banner: chromeBanner,
+    });
+    const crContentCtx = await esbuild.context({
+      ...chromeExtension,
+      entryPoints: ["src/content/index.ts"],
+      outfile: "dist/chrome/content.js",
+      banner: chromeBanner,
+    });
+
+    // Node watch contexts
+    const bridgeCtx = await esbuild.context({
+      ...sharedNode,
+      entryPoints: ["src/bridge/host.ts"],
+      outfile: "dist/bridge.mjs",
+      banner: { js: "#!/usr/bin/env node" },
+    });
+    const mcpCtx = await esbuild.context({
+      ...sharedNode,
+      entryPoints: ["src/mcp/server.ts"],
+      outfile: "dist/mcp-server.mjs",
+      banner: { js: "#!/usr/bin/env node" },
+      external: mcpServerExternals,
+    });
+    const cliCtx = await esbuild.context({
+      ...sharedNode,
+      entryPoints: ["src/cli.ts"],
+      outfile: "dist/cli.mjs",
+      banner: { js: "#!/usr/bin/env node" },
+      external: cliExternals,
+    });
+    const notebookChromeCtx = await createNotebookUiWatchContext();
+
+    await copyStatic();
+    watchNotebookStatic();
+    await Promise.all([
+      fxBgCtx.watch(), fxContentCtx.watch(),
+      crBgCtx.watch(), crContentCtx.watch(),
+      bridgeCtx.watch(), mcpCtx.watch(), cliCtx.watch(),
+      notebookChromeCtx.watch(),
+    ]);
+    console.log("Watching for changes (Firefox + Chrome)...");
+    return;
+  }
+
+  if (notebookOnly) {
+    await copyNotebookStatic();
+    await Promise.all([buildNotebookUi(), buildNotebookServer()]);
+    return;
+  }
+
   // One-shot build
   const polyfillBanner = await getChromePolyfillBanner();
   const chromeBanner = { js: polyfillBanner };
@@ -295,3 +365,8 @@ if (watch) {
 
   await Promise.all([firefoxBuild, chromeBuild, nodeBuild, uiBuild]);
 }
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+});

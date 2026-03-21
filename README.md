@@ -105,10 +105,14 @@ The stable wrapper lives at `<dataDir>/bin/broc`.
 The staged runtime is the supported end-user path. Firefox/Chrome repo flows remain available for repo/dev compatibility only:
 
 - `npm run dev`
+- `npm run dev:notebook` to run the notebook UI and notebook API server without launching the rest of the Broc stack
 - `npm test`
 - `npm run build`
+- `npm run build:notebook` to build only the notebook UI and standalone notebook dev server
 - `npm run build:runtime`
 - `npm run setup -- --browser=firefox|chrome|chromium`
 - `npm run launch -- --browser=firefox|chrome|chromium`
+
+The notebook-only dev flow serves the real notebook API locally at `http://127.0.0.1:43123/notebook.html`.
 
 Architecture details and protocol internals are in [DOCS.md](./DOCS.md).

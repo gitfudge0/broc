@@ -110,7 +110,7 @@ export const timelineCSS = /* css */ `
 .tl {
   display: flex;
   flex-direction: row;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
   overflow-x: auto;
   padding-bottom: var(--sp-3);
   scroll-snap-type: x mandatory;
@@ -118,20 +118,19 @@ export const timelineCSS = /* css */ `
 
 .tl-item {
   flex-shrink: 0;
-  width: 220px;
+  width: 210px;
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  padding: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--surface);
   scroll-snap-align: start;
-  transition: box-shadow 0.15s;
 }
 
 .tl-item:hover {
-  box-shadow: var(--shadow-card);
+  border-color: var(--border-strong);
 }
 
 .tl-item__top {
@@ -141,16 +140,16 @@ export const timelineCSS = /* css */ `
 }
 
 .tl-item__ordinal {
-  font-family: var(--font-display);
-  font-size: 12px;
-  font-weight: 800;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 700;
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
 .tl-item__label {
-  font-family: var(--font-display);
-  font-size: 13px;
+  font-family: var(--font-body);
+  font-size: 12px;
   font-weight: 700;
   color: var(--text-primary);
   white-space: nowrap;
@@ -159,7 +158,7 @@ export const timelineCSS = /* css */ `
 }
 
 .tl-item__desc {
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.4;
   color: var(--text-secondary);
   display: -webkit-box;
@@ -169,8 +168,8 @@ export const timelineCSS = /* css */ `
 }
 
 .tl-item__meta {
-  font-family: var(--font-display);
-  font-size: 11px;
+  font-family: var(--font-body);
+  font-size: 10px;
   color: var(--text-muted);
   margin-top: auto;
 }
@@ -178,17 +177,17 @@ export const timelineCSS = /* css */ `
 .tl-item__details {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--sp-1);
+  gap: 4px;
 }
 
 .tl-item__detail {
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.2;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   background: var(--surface-muted);
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 2px 6px;
+  padding: 1px 6px;
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -201,11 +200,12 @@ export const timelineCSS = /* css */ `
   align-items: center;
   padding: var(--sp-4);
   color: var(--text-muted);
+  font-size: 12px;
 }
 
 @media (max-width: 900px) {
   .tl-item {
-    width: 180px;
+    width: 170px;
   }
 }
 `;

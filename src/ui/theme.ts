@@ -1,8 +1,8 @@
 /**
  * Design tokens and global stylesheet for the Broc Notebook UI.
  *
- * Inspired by editorial / magazine aesthetics: warm neutrals, strong
- * typographic hierarchy, generous whitespace, and restrained accent color.
+ * Swiss-minimalist aesthetic: near-monochrome palette, clean sans-serif
+ * typography, generous whitespace, single warm accent color (red/coral).
  */
 
 export const themeCSS = /* css */ `
@@ -13,44 +13,44 @@ export const themeCSS = /* css */ `
   color-scheme: light;
 
   /* palette */
-  --bg:              #f4f1eb;
+  --bg:              #f5f5f4;
   --surface:         #ffffff;
-  --surface-muted:   #faf8f5;
-  --surface-hover:   #f0ede7;
+  --surface-muted:   #fafaf9;
+  --surface-hover:   #f0f0ee;
 
-  --text-primary:    #1a1a1a;
-  --text-secondary:  #6b6560;
-  --text-muted:      #a8a29e;
+  --text-primary:    #0a0a0a;
+  --text-secondary:  #525252;
+  --text-muted:      #a3a3a3;
 
-  --accent:          #174c63;
-  --accent-soft:     #d5e5eb;
-  --accent-hover:    #1b5d78;
+  --accent:          #dc2626;
+  --accent-soft:     #fef2f2;
+  --accent-hover:    #b91c1c;
 
   --border:          rgba(0, 0, 0, 0.06);
   --border-strong:   rgba(0, 0, 0, 0.12);
 
   /* status */
-  --status-running-bg:    #dbeafe;
-  --status-running-fg:    #1e5a8a;
-  --status-completed-bg:  #d9ead7;
-  --status-completed-fg:  #1f6f34;
-  --status-failed-bg:     #f4d7d5;
-  --status-failed-fg:     #8a2820;
-  --status-blocked-bg:    #f4d7d5;
-  --status-blocked-fg:    #8a2820;
-  --status-pending-bg:    #f0ede7;
-  --status-pending-fg:    #6b6560;
-  --status-waiting-bg:    #fef3cd;
-  --status-waiting-fg:    #856404;
-  --status-archived-bg:   #e8e5df;
-  --status-archived-fg:   #6b6560;
+  --status-running-bg:    #fef2f2;
+  --status-running-fg:    #dc2626;
+  --status-completed-bg:  #f0fdf4;
+  --status-completed-fg:  #16a34a;
+  --status-failed-bg:     #fef2f2;
+  --status-failed-fg:     #dc2626;
+  --status-blocked-bg:    #fef2f2;
+  --status-blocked-fg:    #dc2626;
+  --status-pending-bg:    #f5f5f4;
+  --status-pending-fg:    #737373;
+  --status-waiting-bg:    #fffbeb;
+  --status-waiting-fg:    #d97706;
+  --status-archived-bg:   #f5f5f4;
+  --status-archived-fg:   #a3a3a3;
 
   /* sidebar */
-  --sidebar-bg: rgba(250, 248, 244, 0.85);
+  --sidebar-bg: #ffffff;
 
   /* typography */
-  --font-display:  'Fraunces', 'Times New Roman', serif;
-  --font-body:     'Manrope', 'Helvetica Neue', sans-serif;
+  --font-display:  'Inter', 'Helvetica Neue', 'Arial', sans-serif;
+  --font-body:     'Inter', 'Helvetica Neue', 'Arial', sans-serif;
   --font-mono:     'JetBrains Mono', 'Fira Code', 'Menlo', monospace;
 
   /* spacing (4px base) */
@@ -65,15 +65,15 @@ export const themeCSS = /* css */ `
   --sp-9:  64px;
 
   /* radii */
-  --radius-sm:  6px;
-  --radius-md:  12px;
-  --radius-lg:  20px;
-  --radius-xl:  28px;
+  --radius-sm:  3px;
+  --radius-md:  5px;
+  --radius-lg:  8px;
+  --radius-xl:  12px;
   --radius-pill: 999px;
 
   /* shadows */
-  --shadow-card:     0 1px 3px rgba(0, 0, 0, 0.04);
-  --shadow-elevated: 0 8px 30px rgba(0, 0, 0, 0.07);
+  --shadow-card:     0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-elevated: 0 4px 16px rgba(0, 0, 0, 0.06);
 }
 
 /* ------------------------------------------------------------------ */
@@ -82,41 +82,42 @@ export const themeCSS = /* css */ `
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --bg:              #131316;
-  --surface:         #1c1c21;
-  --surface-muted:   #18181c;
-  --surface-hover:   #252529;
+  --bg:              #0a0a0a;
+  --surface:         #141414;
+  --surface-muted:   #111111;
+  --surface-hover:   #1f1f1f;
 
-  --text-primary:    #e8e6e3;
-  --text-secondary:  #9b9690;
-  --text-muted:      #5c5752;
+  --text-primary:    #f5f5f5;
+  --text-secondary:  #a3a3a3;
+  --text-muted:      #525252;
 
-  --accent:          #6bb8d6;
-  --accent-soft:     #1e3a48;
-  --accent-hover:    #8acae3;
+  --accent:          #ef4444;
+  --accent-soft:     #1c1111;
+  --accent-hover:    #f87171;
 
-  --border:          rgba(255, 255, 255, 0.07);
-  --border-strong:   rgba(255, 255, 255, 0.14);
+  --border:          rgba(255, 255, 255, 0.06);
+  --border-strong:   rgba(255, 255, 255, 0.12);
 
-  --status-running-bg:    #172540;
-  --status-running-fg:    #6bb8d6;
-  --status-completed-bg:  #15301a;
-  --status-completed-fg:  #6fcf7f;
-  --status-failed-bg:     #351616;
-  --status-failed-fg:     #e57373;
-  --status-blocked-bg:    #351616;
-  --status-blocked-fg:    #e57373;
-  --status-pending-bg:    #252529;
-  --status-pending-fg:    #9b9690;
-  --status-waiting-bg:    #332d15;
-  --status-waiting-fg:    #e0c55b;
-  --status-archived-bg:   #252529;
-  --status-archived-fg:   #5c5752;
+  /* status */
+  --status-running-bg:    #1c1111;
+  --status-running-fg:    #ef4444;
+  --status-completed-bg:  #0d1f12;
+  --status-completed-fg:  #4ade80;
+  --status-failed-bg:     #1c1111;
+  --status-failed-fg:     #ef4444;
+  --status-blocked-bg:    #1c1111;
+  --status-blocked-fg:    #ef4444;
+  --status-pending-bg:    #1a1a1a;
+  --status-pending-fg:    #737373;
+  --status-waiting-bg:    #1a1608;
+  --status-waiting-fg:    #fbbf24;
+  --status-archived-bg:   #1a1a1a;
+  --status-archived-fg:   #525252;
 
-  --sidebar-bg: rgba(22, 22, 26, 0.9);
+  --sidebar-bg: #111111;
 
-  --shadow-card:     0 1px 3px rgba(0, 0, 0, 0.2);
-  --shadow-elevated: 0 8px 30px rgba(0, 0, 0, 0.35);
+  --shadow-card:     0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-elevated: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 
 /* ------------------------------------------------------------------ */
@@ -130,7 +131,7 @@ body {
   background: var(--bg);
   color: var(--text-primary);
   font-family: var(--font-body);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -155,20 +156,27 @@ button {
 }
 
 a {
-  color: var(--accent);
-  text-decoration: none;
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+  transition: text-decoration-color 0.15s;
 }
-a:hover { text-decoration: underline; }
+a:hover {
+  text-decoration-color: var(--text-primary);
+}
 
 .short-link {
   font-family: var(--font-display);
   font-size: inherit;
   font-weight: 600;
-  color: var(--accent);
-  text-decoration: none;
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
 }
 .short-link:hover {
-  text-decoration: underline;
+  text-decoration-color: var(--text-primary);
 }
 
 pre, code { font-family: var(--font-mono); }
@@ -181,9 +189,9 @@ img { display: block; max-width: 100%; }
 .eyebrow {
   font-family: var(--font-display);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   color: var(--text-muted);
 }
 

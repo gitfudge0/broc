@@ -32,37 +32,39 @@ export const paginationCSS = /* css */ `
 .pagination {
   display: inline-flex;
   align-items: center;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
 }
 .pagination__arrow {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
   color: var(--text-primary);
-  transition: background 0.15s;
+  transition: border-color 0.15s;
 }
 .pagination__arrow:hover:not(:disabled) {
-  background: var(--surface-hover);
+  border-color: var(--border-strong);
 }
 .pagination__arrow--disabled {
-  opacity: 0.25;
+  opacity: 0.2;
   cursor: default;
 }
 .pagination__label {
-  font-family: var(--font-display);
-  font-size: 13px;
+  font-family: var(--font-body);
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
   letter-spacing: 0.02em;
 }
 .pagination__current {
   color: var(--text-primary);
+  font-weight: 700;
 }
 .pagination__sep {
-  margin: 0 2px;
+  margin: 0 1px;
   color: var(--text-muted);
 }
 `;
