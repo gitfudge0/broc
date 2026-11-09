@@ -94,6 +94,7 @@ export function spawnLaunchPlan(
 ): ChildProcess {
   return spawn(plan.command, plan.args, {
     cwd: plan.cwd,
+    detached: process.platform !== "win32",
     env: plan.env,
     stdio: "inherit",
     ...options,
@@ -171,6 +172,19 @@ function hasExited(target: ProcessLike): boolean {
     || target.signalCode !== undefined && target.signalCode !== null;
 }
 
+function signalProcessTree(target: ProcessLike, signal: NodeJS.Signals): void {
+  if (typeof target.pid === "number" && target.pid > 0 && process.platform !== "win32") {
+    try {
+      process.kill(-target.pid, signal);
+      return;
+    } catch {
+      // Fall through to direct child signaling when the process group no longer exists.
+    }
+  }
+
+  target.kill(signal);
+}
+
 function waitForProcessExit(target: ProcessLike): Promise<void> {
   if (hasExited(target)) {
     return Promise.resolve();
@@ -225,7 +239,7 @@ export async function terminateProcess(
   const exitPromise = waitForProcessExit(target);
 
   try {
-    target.kill(signal);
+    signalProcessTree(target, signal);
   } catch {
     return;
   }
@@ -235,7 +249,7 @@ export async function terminateProcess(
   }
 
   try {
-    target.kill(forceSignal);
+    signalProcessTree(target, forceSignal);
   } catch {
     return;
   }
@@ -262,7 +276,7 @@ export function attachTerminationHandlers(
     ? ((signal: NodeJS.Signals) => {
         for (const target of targets) {
           try {
-            target.kill(signal);
+            signalProcessTree(target, signal);
           } catch {
             // Ignore already-exited children.
           }
@@ -271,7 +285,7 @@ export function attachTerminationHandlers(
     : ((onSignalOrRegisterHandler as TerminationSignalHandler | undefined) ?? ((signal: NodeJS.Signals) => {
         for (const target of targets) {
           try {
-            target.kill(signal);
+            signalProcessTree(target, signal);
           } catch {
             // Ignore already-exited children.
           }

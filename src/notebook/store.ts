@@ -9,13 +9,19 @@ import type {
   NotebookArtifactInput,
   NotebookCreateInput,
   NotebookEvent,
+  NotebookGatheredResult,
   NotebookIndex,
+  NotebookMilestone,
   NotebookMetaUpdate,
   NotebookTaskMeta,
   NotebookTaskRecord,
   NotebookTaskSummary,
+  NotebookTabId,
   NotebookView,
   NotebookViewUpdate,
+  NotebookTaskWorkflow,
+  NotebookPresentationState,
+  NotebookPresentationSection,
 } from "./types.js";
 
 const SCHEMA_VERSION = 1;
@@ -24,6 +30,7 @@ interface TaskPaths {
   taskDir: string;
   metaPath: string;
   viewPath: string;
+  workflowPath: string;
   eventsPath: string;
   artifactsDir: string;
 }
@@ -50,6 +57,7 @@ function taskPaths(appPaths: AppPaths, taskId: string): TaskPaths {
     taskDir,
     metaPath: resolve(taskDir, "meta.json"),
     viewPath: resolve(taskDir, "view.json"),
+    workflowPath: resolve(taskDir, "workflow.json"),
     eventsPath: resolve(taskDir, "events.ndjson"),
     artifactsDir: resolve(taskDir, "artifacts"),
   };
@@ -125,7 +133,131 @@ function defaultMeta(input: NotebookCreateInput): NotebookTaskMeta {
 }
 
 function defaultView(input: NotebookCreateInput): NotebookView {
-  return input.goal ? { summary: input.goal } : {};
+  return buildCanonicalView(
+    {},
+    defaultWorkflow(input),
+  );
+}
+
+function defaultWorkflow(input: NotebookCreateInput): NotebookTaskWorkflow {
+  return {
+    task: input.task ?? input.goal ?? input.title,
+    plan: input.plan ?? [{
+      id: "step-1",
+      label: "Gather context and begin the task",
+      status: "pending",
+    }],
+    milestones: [],
+    gatheredResults: [],
+    finalOutput: {},
+    presentation: {
+      highlights: [],
+      suggestedActions: [],
+      customSections: [],
+    },
+  };
+}
+
+const RESERVED_SECTION_IDS = new Set(["final-output"]);
+
+function dedupeById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const deduped: T[] = [];
+  for (const item of items) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    deduped.push(item);
+  }
+  return deduped;
+}
+
+function defaultSectionTab(sectionId: string): NotebookTabId {
+  return "final-output";
+}
+
+function normalizeCustomSections(current: NotebookView, workflow: NotebookTaskWorkflow): NotebookPresentationSection[] {
+  const currentSections = Array.isArray(current.sections)
+    ? current.sections
+      .filter((section) => !RESERVED_SECTION_IDS.has(section.id))
+      .map((section) => ({
+        id: section.id,
+        title: section.title,
+        kind: section.kind,
+        tab: section.tab ?? defaultSectionTab(section.id),
+        content: section.content,
+      }))
+    : [];
+  const workflowSections = workflow.presentation?.customSections ?? [];
+  return dedupeById([...workflowSections, ...currentSections]);
+}
+
+function formatGatheredResultMarkdown(gathered: NotebookGatheredResult[]): string {
+  return gathered.map((item, index) => {
+    if (item.fields && Object.keys(item.fields).length > 0) {
+      const fields = Object.entries(item.fields).map(([key, value]) => `${key}: ${value}`).join("; ");
+      return `${index + 1}. ${item.label}: ${item.value}${fields ? ` (${fields})` : ""}`;
+    }
+    return `${index + 1}. ${item.label}: ${item.value}`;
+  }).join("\n");
+}
+
+function buildCanonicalView(current: NotebookView, workflow: NotebookTaskWorkflow): NotebookView {
+  const customSections = normalizeCustomSections(current, workflow);
+  const presentation = workflow.presentation ?? {};
+
+  const finalOutput = workflow.finalOutput ?? {};
+  const summary = finalOutput.summary?.trim();
+  const normalizedTask = workflow.task?.trim();
+  const milestones = workflow.milestones ?? [];
+  const summaryBlock = summary && summary !== normalizedTask ? `## Summary\n${summary}` : "";
+  const detailsBlock = finalOutput.details ? `## Gathered Information\n${finalOutput.details}` : "";
+  const gathered = finalOutput.gathered ?? workflow.gatheredResults ?? [];
+  const gatheredBlock = gathered.length > 0
+    ? `## Results\n${formatGatheredResultMarkdown(gathered)}`
+    : "";
+  const milestoneBlock = milestones.length > 0
+    ? `## Milestones\n${milestones.map((item, index) => `${index + 1}. ${item.title}: ${item.summary}`).join("\n")}`
+    : "";
+  const finalSection = {
+    id: "final-output",
+    title: "Final Output",
+    kind: "markdown",
+    tab: "final-output" as NotebookTabId,
+    content: [
+      workflow.task ? `## Initial Task\n${workflow.task}` : "",
+      summaryBlock,
+      detailsBlock,
+      gatheredBlock,
+      milestoneBlock,
+    ].filter(Boolean).join("\n\n") || "Task details will appear here as the agent works.",
+  };
+
+  const baseHighlights = presentation.highlights ?? current.highlights ?? [];
+  const derivedHighlights = [
+    { id: "highlight-status", label: "Status", value: summary ?? workflow.task ?? "In progress" },
+    { id: "highlight-plan", label: "Plan Steps", value: String((workflow.plan ?? []).length) },
+    { id: "highlight-results", label: "Results", value: String(gathered.length) },
+  ];
+  const highlights = dedupeById([...baseHighlights, ...derivedHighlights]);
+  const suggestedActions = dedupeById([
+    ...(presentation.suggestedActions ?? []),
+    ...(current.suggestedActions ?? []),
+  ]);
+  const sections = [
+    finalSection,
+    ...customSections.map((section) => ({
+      ...section,
+      tab: "final-output" as NotebookTabId,
+    })),
+  ];
+
+  return {
+    ...current,
+    summary: presentation.summary ?? current.summary ?? summary ?? finalOutput.details ?? workflow.task ?? current.summary,
+    highlights,
+    suggestedActions,
+    sections,
+  };
 }
 
 async function deleteLegacyCanvasData(appPaths: AppPaths): Promise<void> {
@@ -178,10 +310,12 @@ export async function createNotebookTask(appPaths: AppPaths, input: NotebookCrea
   }
 
   const meta = defaultMeta({ ...input, id: taskId });
-  const view = defaultView(input);
+  const workflow = defaultWorkflow(input);
+  const view = buildCanonicalView(defaultView(input), workflow);
   await ensureDir(paths.artifactsDir);
   await writeJson(paths.metaPath, meta);
   await writeJson(paths.viewPath, view);
+  await writeJson(paths.workflowPath, workflow);
   await writeFile(paths.eventsPath, "", "utf-8");
 
   const created = await appendNotebookEvent(appPaths, meta.id, {
@@ -194,7 +328,7 @@ export async function createNotebookTask(appPaths: AppPaths, input: NotebookCrea
   index.tasks = [toSummary(meta, view), ...index.tasks.filter((task) => task.id !== meta.id)];
   await saveIndex(appPaths, index);
 
-  return { meta, view, events: [created] };
+  return { meta, view, workflow, events: [created] };
 }
 
 export async function listNotebookTasks(appPaths: AppPaths): Promise<NotebookTaskSummary[]> {
@@ -219,9 +353,10 @@ export async function loadNotebookTask(
   await ensureNotebookStore(appPaths);
   const paths = taskPaths(appPaths, taskId);
   const meta = await loadTaskMeta(appPaths, taskId);
-  const view = await readJson<NotebookView>(paths.viewPath, {});
+  const workflow = await readJson<NotebookTaskWorkflow>(paths.workflowPath, defaultWorkflow({ title: meta.title }));
+  const view = buildCanonicalView(await readJson<NotebookView>(paths.viewPath, {}), workflow);
   const events = options.includeEvents ? await readNotebookEvents(appPaths, taskId) : undefined;
-  return { meta, view, events };
+  return { meta, view, workflow, events };
 }
 
 async function updateIndexEntry(appPaths: AppPaths, meta: NotebookTaskMeta, view: NotebookView): Promise<void> {
@@ -270,19 +405,181 @@ export async function setNotebookView(
   await ensureNotebookStore(appPaths);
   const paths = taskPaths(appPaths, taskId);
   await loadTaskMeta(appPaths, taskId);
-  const current = await readJson<NotebookView>(paths.viewPath, {});
+  const workflow = await readJson<NotebookTaskWorkflow>(paths.workflowPath, defaultWorkflow({ title: taskId }));
+  const current = buildCanonicalView(await readJson<NotebookView>(paths.viewPath, {}), workflow);
   const next = update.merge
     ? mergeRecord(current as Record<string, unknown>, update.value as Record<string, unknown>) as NotebookView
     : update.value;
-  await writeJson(paths.viewPath, next);
+  await writeJson(paths.viewPath, buildCanonicalView(next, workflow));
   const refreshedMeta = await touchTask(appPaths, taskId);
-  await updateIndexEntry(appPaths, refreshedMeta, next);
+  await updateIndexEntry(appPaths, refreshedMeta, buildCanonicalView(next, workflow));
   await appendNotebookEvent(appPaths, taskId, {
     type: "notebook.view_updated",
     actor: "agent",
     payload: { merge: !!update.merge },
   });
   return next;
+}
+
+export async function setNotebookWorkflow(
+  appPaths: AppPaths,
+  taskId: string,
+  update: NotebookViewUpdate<NotebookTaskWorkflow>,
+): Promise<NotebookTaskWorkflow> {
+  await ensureNotebookStore(appPaths);
+  const paths = taskPaths(appPaths, taskId);
+  const meta = await loadTaskMeta(appPaths, taskId);
+  const current = await readJson<NotebookTaskWorkflow>(paths.workflowPath, defaultWorkflow({ title: meta.title }));
+  const next = update.merge
+    ? mergeRecord(current as Record<string, unknown>, update.value as Record<string, unknown>) as NotebookTaskWorkflow
+    : update.value;
+  await writeJson(paths.workflowPath, next);
+  const view = buildCanonicalView(await readJson<NotebookView>(paths.viewPath, {}), next);
+  await writeJson(paths.viewPath, view);
+  const refreshedMeta = await touchTask(appPaths, taskId);
+  await updateIndexEntry(appPaths, refreshedMeta, view);
+  await appendNotebookEvent(appPaths, taskId, {
+    type: "notebook.workflow_updated",
+    actor: "system",
+    payload: { merge: !!update.merge },
+  });
+  return next;
+}
+
+export async function setNotebookPresentation(
+  appPaths: AppPaths,
+  taskId: string,
+  update: NotebookViewUpdate<NotebookPresentationState>,
+): Promise<NotebookPresentationState> {
+  const record = await loadNotebookTask(appPaths, taskId);
+  const current = record.workflow.presentation ?? {
+    highlights: [],
+    suggestedActions: [],
+    customSections: [],
+  };
+  const next = update.merge
+    ? mergeRecord(current as Record<string, unknown>, update.value as Record<string, unknown>) as NotebookPresentationState
+    : update.value;
+  await setNotebookWorkflow(appPaths, taskId, {
+    merge: false,
+    value: {
+      ...record.workflow,
+      presentation: next,
+    },
+  });
+  return next;
+}
+
+export async function setNotebookSummary(appPaths: AppPaths, taskId: string, summary: string): Promise<void> {
+  const record = await loadNotebookTask(appPaths, taskId);
+  await setNotebookWorkflow(appPaths, taskId, {
+    merge: false,
+    value: {
+      ...record.workflow,
+      presentation: {
+        ...(record.workflow.presentation ?? {}),
+        summary,
+      },
+    },
+  });
+}
+
+export async function addNotebookHighlight(
+  appPaths: AppPaths,
+  taskId: string,
+  highlight: { id: string; label: string; value: string },
+): Promise<void> {
+  const record = await loadNotebookTask(appPaths, taskId);
+  const current = record.workflow.presentation?.highlights ?? [];
+  await setNotebookWorkflow(appPaths, taskId, {
+    merge: false,
+    value: {
+      ...record.workflow,
+      presentation: {
+        ...(record.workflow.presentation ?? {}),
+        highlights: dedupeById([highlight, ...current]),
+      },
+    },
+  });
+}
+
+export async function addNotebookSuggestedAction(
+  appPaths: AppPaths,
+  taskId: string,
+  action: { id: string; label: string; kind: "open_url" | "focus_tab" | "view_artifact" | "dismiss"; payload?: Record<string, unknown> },
+): Promise<void> {
+  const record = await loadNotebookTask(appPaths, taskId);
+  const current = record.workflow.presentation?.suggestedActions ?? [];
+  await setNotebookWorkflow(appPaths, taskId, {
+    merge: false,
+    value: {
+      ...record.workflow,
+      presentation: {
+        ...(record.workflow.presentation ?? {}),
+        suggestedActions: dedupeById([action, ...current]),
+      },
+    },
+  });
+}
+
+export async function upsertNotebookSection(
+  appPaths: AppPaths,
+  taskId: string,
+  section: NotebookPresentationSection,
+): Promise<void> {
+  const record = await loadNotebookTask(appPaths, taskId);
+  const current = record.workflow.presentation?.customSections ?? [];
+  await setNotebookWorkflow(appPaths, taskId, {
+    merge: false,
+    value: {
+      ...record.workflow,
+      presentation: {
+        ...(record.workflow.presentation ?? {}),
+        customSections: dedupeById([section, ...current]),
+      },
+    },
+  });
+}
+
+export async function addNotebookMilestone(
+  appPaths: AppPaths,
+  taskId: string,
+  milestone: NotebookMilestone,
+): Promise<NotebookMilestone> {
+  const record = await loadNotebookTask(appPaths, taskId);
+  const workflow: NotebookTaskWorkflow = {
+    ...record.workflow,
+    milestones: [milestone, ...(record.workflow.milestones ?? [])],
+  };
+  await setNotebookWorkflow(appPaths, taskId, { merge: false, value: workflow });
+  return milestone;
+}
+
+export async function addNotebookGatheredResult(
+  appPaths: AppPaths,
+  taskId: string,
+  result: Omit<NotebookGatheredResult, "id" | "createdAt"> & Partial<Pick<NotebookGatheredResult, "id" | "createdAt">>,
+): Promise<NotebookGatheredResult> {
+  const record = await loadNotebookTask(appPaths, taskId);
+  const nextResult: NotebookGatheredResult = {
+    id: result.id ?? randomUUID(),
+    createdAt: result.createdAt ?? nowIso(),
+    label: result.label,
+    value: result.value,
+    source: result.source,
+    fields: result.fields,
+  };
+  const gatheredResults = [nextResult, ...(record.workflow.gatheredResults ?? []).filter((item) => item.id !== nextResult.id)].slice(0, 50);
+  const workflow: NotebookTaskWorkflow = {
+    ...record.workflow,
+    gatheredResults,
+    finalOutput: {
+      ...record.workflow.finalOutput,
+      gathered: record.workflow.finalOutput?.gathered?.length ? record.workflow.finalOutput.gathered : gatheredResults,
+    },
+  };
+  await setNotebookWorkflow(appPaths, taskId, { merge: false, value: workflow });
+  return nextResult;
 }
 
 export async function appendNotebookEvent(appPaths: AppPaths, taskId: string, input: NotebookAppendEventInput): Promise<NotebookEvent> {

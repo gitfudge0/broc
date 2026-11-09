@@ -19,7 +19,7 @@
 import { access } from "fs/promises";
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
-import { spawn } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -28,7 +28,6 @@ import type { Action } from "../shared/types/actions.js";
 import type {
   ElementContext,
   ApprovalRequest,
-  ApprovalDecision,
 } from "../shared/types/safety.js";
 import {
   assessRisk,
@@ -41,6 +40,7 @@ import { getAppPaths, getRepoPaths } from "../cli/paths.js";
 import { normalizeProfilePath } from "../cli/profile-paths.js";
 import { loadSetupState } from "../cli/state.js";
 import type { BrowserType } from "../cli/types.js";
+import { terminateProcess } from "../cli/launch.js";
 import {
   applyBridgePresentation,
   collectBrowserStatusReport,
@@ -48,18 +48,31 @@ import {
   type BridgePhase,
 } from "../shared/bridge-status.js";
 import {
+  addNotebookGatheredResult,
+  addNotebookHighlight,
   addNotebookArtifact,
+  addNotebookMilestone,
+  addNotebookSuggestedAction,
   appendNotebookEvent,
   createNotebookTask,
   ensureNotebookStore,
   listNotebookTasks,
   loadNotebookTask,
+  setNotebookSummary,
+  setNotebookWorkflow,
   setNotebookView,
+  upsertNotebookSection,
   updateNotebookMeta,
 } from "../notebook/store.js";
-import { getNotebookUrl } from "../notebook/server.js";
+import { getNotebookUrl, registerNotebookServerHooks } from "../notebook/server.js";
 import { TaskBindingRegistry } from "../notebook/task-bindings.js";
-import type { NotebookView } from "../notebook/types.js";
+import type {
+  NotebookGatheredResult,
+  NotebookPlanStep,
+  NotebookTaskRecord,
+  NotebookTabId,
+  NotebookView,
+} from "../notebook/types.js";
 import type { AuditEntry } from "../shared/types/safety.js";
 
 const log = createNodeLogger("mcp");
@@ -80,8 +93,8 @@ const auditLog = new AuditLog();
 /**
  * Pending approval requests, keyed by approvalId.
  * When a high-risk action requires approval, we store it here
- * and return the approval request to the agent. The agent must
- * call browser_approve to continue.
+ * and return the approval request to the agent. The user resolves
+ * it from the notebook UI.
  */
 const pendingApprovals = new Map<
   string,
@@ -89,20 +102,19 @@ const pendingApprovals = new Map<
     request: ApprovalRequest;
     action: Action;
     tabId?: number;
-    resolve: (decision: ApprovalDecision) => void;
-    timer: ReturnType<typeof setTimeout>;
+    taskId: string;
   }
 >();
 
 let nextApprovalId = 1;
-
-/** Approval timeout in ms (2 minutes) */
-const APPROVAL_TIMEOUT_MS = 120_000;
 let bridgeWasConnected = false;
 let bridgeAutostartPromise: Promise<void> | null = null;
+let ownedAutostartProcess: ChildProcess | null = null;
+let shutdownOwnedAutostartPromise: Promise<void> | null = null;
 let lastSessionId = "default";
 let lastTabId: number | undefined;
 const notebookTaskBindings = new TaskBindingRegistry();
+const BROC_LAUNCH_SUPERVISOR_ENV = "BROC_LAUNCH_SUPERVISOR";
 
 // ---- Snapshot formatting ----
 
@@ -226,6 +238,76 @@ function bindNotebookTask(taskId: string, params: { sessionId?: string; tabId?: 
   notebookTaskBindings.bind(taskId, params);
 }
 
+function deriveInitialPlan(task: string): NotebookPlanStep[] {
+  const normalized = task
+    .split(/\n+/)
+    .flatMap((line) => line.split(/\s+(?:and then|then|and)\s+/i))
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const labels = normalized.length > 1
+    ? normalized.slice(0, 5)
+    : [
+      "Inspect the current browser context",
+      "Execute the next smallest useful action",
+      "Verify the result and collect final information",
+    ];
+
+  return labels.map((label, index) => ({
+    id: `step-${index + 1}`,
+    label,
+    status: index === 0 ? "running" : "pending",
+  }));
+}
+
+async function createManagedNotebookTask(params: {
+  title: string;
+  task: string;
+  tags?: string[];
+  sessionId?: string;
+  tabId?: number;
+  open?: boolean;
+}): Promise<NotebookTaskRecord> {
+  const plan = deriveInitialPlan(params.task);
+  const task = await createNotebookTask(appPaths, {
+    title: params.title,
+    goal: params.task,
+    task: params.task,
+    tags: params.tags,
+    sessionId: params.sessionId,
+    tabId: params.tabId,
+    plan,
+  });
+  bindNotebookTask(task.meta.id, { sessionId: task.meta.sessionId, tabId: task.meta.tabId });
+  await appendNotebookEvent(appPaths, task.meta.id, {
+    type: "task.plan_created",
+    actor: "agent",
+    payload: { steps: plan },
+  });
+  if (params.open) {
+    await openNotebookWindow(task.meta.id).catch(() => {});
+  }
+  return loadNotebookTask(appPaths, task.meta.id, { includeEvents: true });
+}
+
+async function ensureNotebookTaskForContext(params: {
+  sessionId?: string;
+  tabId?: number;
+  title?: string;
+  task?: string;
+}): Promise<NotebookTaskRecord> {
+  const linked = await findLinkedNotebookTask({ sessionId: params.sessionId, tabId: params.tabId });
+  if (linked) return linked;
+  const title = params.title ?? "Browser Task";
+  const task = params.task ?? "Continue the current browser task in small, verified steps.";
+  return createManagedNotebookTask({
+    title,
+    task,
+    sessionId: params.sessionId,
+    tabId: params.tabId,
+  });
+}
+
 async function hydrateNotebookTaskBindings(): Promise<void> {
   const tasks = await listNotebookTasks(appPaths);
   const bindings = await Promise.all(tasks.map(async (task) => {
@@ -326,6 +408,208 @@ async function mirrorAuditEntryToNotebook(entry: AuditEntry, phase: "approval_re
     result: entry.result,
     snapshot: lastSnapshot,
   });
+}
+
+async function syncTaskProgress(params: {
+  taskId: string;
+  action: Action;
+  phase: "requested" | "completed" | "failed" | "approval_requested";
+  snapshot?: Snapshot | null;
+  resultData?: string;
+  screenshotArtifactId?: string;
+}): Promise<void> {
+  const record = await loadNotebookTask(appPaths, params.taskId).catch(() => null);
+  if (!record) return;
+
+  const plan = [...(record.workflow.plan ?? [])];
+  if (plan.length > 0) {
+    const activeIndex = plan.findIndex((step) => step.status === "running");
+    if (params.phase === "completed") {
+      const index = activeIndex >= 0 ? activeIndex : 0;
+      if (plan[index]) {
+        plan[index] = { ...plan[index], status: "completed" };
+      }
+      if (plan[index + 1]) {
+        plan[index + 1] = { ...plan[index + 1], status: "running" };
+      }
+    } else if (params.phase === "approval_requested") {
+      const index = activeIndex >= 0 ? activeIndex : 0;
+      if (plan[index]) {
+        plan[index] = { ...plan[index], status: "blocked" };
+      }
+    } else if (params.phase === "failed") {
+      const index = activeIndex >= 0 ? activeIndex : 0;
+      if (plan[index]) {
+        plan[index] = { ...plan[index], status: "blocked" };
+      }
+    }
+  }
+
+  const summary = params.phase === "completed"
+    ? `Completed ${params.action.type}${params.snapshot?.title ? ` on ${params.snapshot.title}` : ""}.`
+    : params.phase === "approval_requested"
+      ? `Waiting for user approval for ${params.action.type}.`
+      : `Action ${params.action.type} failed.`;
+
+  await setNotebookWorkflow(appPaths, params.taskId, {
+    merge: false,
+    value: {
+      ...record.workflow,
+      plan,
+      finalOutput: {
+        ...record.workflow.finalOutput,
+        summary: record.workflow.finalOutput?.summary,
+        details: record.workflow.finalOutput?.details
+          ?? (params.resultData && params.action.type === "extract" ? params.resultData : record.workflow.finalOutput?.details),
+        gathered: record.workflow.finalOutput?.gathered?.length
+          ? record.workflow.finalOutput.gathered
+          : record.workflow.gatheredResults,
+        screenshotArtifactId: record.workflow.finalOutput?.screenshotArtifactId,
+      },
+    },
+  }).catch(() => {});
+
+  if (params.phase === "completed") {
+    await addNotebookMilestone(appPaths, params.taskId, {
+      id: `milestone_${Date.now()}`,
+      title: `${params.action.type} completed`,
+      summary,
+      createdAt: new Date().toISOString(),
+      screenshotArtifactId: params.screenshotArtifactId,
+    }).catch(() => {});
+  }
+}
+
+async function synthesizeFinalOutput(taskId: string): Promise<void> {
+  const record = await loadNotebookTask(appPaths, taskId).catch(() => null);
+  if (!record) return;
+
+  const gathered = record.workflow.finalOutput?.gathered?.length
+    ? record.workflow.finalOutput.gathered
+    : record.workflow.gatheredResults ?? [];
+  const milestones = record.workflow.milestones ?? [];
+  const explicitSummary = record.workflow.finalOutput?.summary?.trim();
+  const summary = explicitSummary
+    || (gathered.length > 0 ? `Collected ${gathered.length} result${gathered.length === 1 ? "" : "s"} for this task.` : undefined)
+    || milestones[0]?.summary
+    || undefined;
+  const details = record.workflow.finalOutput?.details
+    || (gathered.length > 0 ? gathered.map((item) => `${item.label}: ${item.value}`).join("\n") : undefined)
+    || (milestones.length > 0 ? milestones.map((item) => `${item.title}: ${item.summary}`).join("\n") : undefined);
+
+  await setNotebookWorkflow(appPaths, taskId, {
+    merge: false,
+    value: {
+      ...record.workflow,
+      finalOutput: {
+        ...record.workflow.finalOutput,
+        summary,
+        details,
+        gathered,
+        screenshotArtifactId: record.workflow.finalOutput?.screenshotArtifactId,
+      },
+    },
+  }).catch(() => {});
+}
+
+function parseGatheredResults(resultData: string, source?: string): NotebookGatheredResult[] {
+  const trimmed = resultData.trim();
+  if (!trimmed) return [];
+
+  const lines = trimmed.split("\n").map((line) => line.trim()).filter(Boolean);
+  const colonPairs = lines
+    .map((line) => line.replace(/^\d+\.\s*/, "").replace(/^[-*]\s*/, "").trim())
+    .map((line) => {
+      const parts = line.split(":").map((part) => part.trim()).filter(Boolean);
+      return parts.length >= 2 ? { label: parts[0], value: parts.slice(1).join(": ") } : null;
+    })
+    .filter((item): item is { label: string; value: string } => !!item);
+  if (colonPairs.length >= 2) {
+    return colonPairs.map((item, index) => ({
+      id: `gathered_${Date.now()}_${index}`,
+      label: item.label,
+      value: item.value,
+      fields: {
+        Label: item.label,
+        Value: item.value,
+      },
+      source,
+      createdAt: new Date().toISOString(),
+    }));
+  }
+
+  const numbered = lines
+    .map((line) => line.replace(/^\d+\.\s*/, "").replace(/^[-*]\s*/, "").trim())
+    .filter(Boolean);
+  if (numbered.length >= 2) {
+    return numbered.map((value, index) => ({
+      id: `gathered_${Date.now()}_${index}`,
+      label: `Item ${index + 1}`,
+      value,
+      fields: {
+        Rank: String(index + 1),
+        Value: value,
+      },
+      source,
+      createdAt: new Date().toISOString(),
+    }));
+  }
+
+  return [{
+    id: `gathered_${Date.now()}`,
+    label: "Result",
+    value: trimmed,
+    source,
+    createdAt: new Date().toISOString(),
+  }];
+}
+
+async function captureNotebookScreenshot(params: {
+  taskId: string;
+  tabId?: number;
+  sessionId?: string;
+  reason: "milestone" | "final";
+}): Promise<string | undefined> {
+  let response: { type: string; screenshot?: string; error?: { message: string } };
+  try {
+    response = (await requestBridge({
+      type: "observe",
+      tabId: params.tabId,
+      screenshot: true,
+    })) as typeof response;
+  } catch {
+    return undefined;
+  }
+
+  if (response.type === "error" || !response.screenshot || typeof response.screenshot !== "string") {
+    return undefined;
+  }
+
+  const base64 = response.screenshot.replace(/^data:image\/\w+;base64,/, "");
+  const artifact = await addNotebookArtifact(appPaths, params.taskId, {
+    kind: "screenshot",
+    name: `${params.reason}-screenshot-${new Date().toISOString().replace(/[:.]/g, "-")}.png`,
+    mimeType: "image/png",
+    extension: ".png",
+    base64Content: base64,
+  }).catch(() => null);
+
+  if (!artifact) return undefined;
+
+  await appendNotebookEvent(appPaths, params.taskId, {
+    type: `browser.observation.${params.reason}_screenshot`,
+    actor: "system",
+    payload: {
+      taskId: params.taskId,
+      tabId: params.tabId,
+      sessionId: params.sessionId,
+      artifactId: artifact.id,
+      pageUrl: lastSnapshot?.url,
+      pageTitle: lastSnapshot?.title,
+    },
+  }).catch(() => {});
+
+  return artifact.id;
 }
 
 function tryJsonParse<T>(value: string, fallback: T): T {
@@ -522,12 +806,51 @@ async function waitForBridgeAfterAutostart(timeoutMs = 15000): Promise<void> {
   );
 }
 
+function hasRunningChild(child: ChildProcess | null | undefined): child is ChildProcess {
+  return !!child && child.exitCode === null && child.signalCode === null;
+}
+
+function trackOwnedAutostartProcess(child: ChildProcess): void {
+  ownedAutostartProcess = child;
+  child.once("exit", () => {
+    if (ownedAutostartProcess === child) {
+      ownedAutostartProcess = null;
+    }
+  });
+}
+
+async function shutdownOwnedAutostartProcess(signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
+  if (shutdownOwnedAutostartPromise) {
+    return shutdownOwnedAutostartPromise;
+  }
+
+  const child = ownedAutostartProcess;
+  if (!child) {
+    return;
+  }
+
+  ownedAutostartProcess = null;
+  shutdownOwnedAutostartPromise = terminateProcess(child, { signal }).finally(() => {
+    shutdownOwnedAutostartPromise = null;
+  });
+  await shutdownOwnedAutostartPromise;
+}
+
 async function autostartBrowserForRequest(): Promise<void> {
   if (bridgeAutostartPromise) {
     return bridgeAutostartPromise;
   }
 
   bridgeAutostartPromise = (async () => {
+    if (hasRunningChild(ownedAutostartProcess)) {
+      try {
+        await waitForBridgeAfterAutostart();
+        return;
+      } catch {
+        await shutdownOwnedAutostartProcess("SIGTERM");
+      }
+    }
+
     const state = await loadSetupState(appPaths.stateFile, {
       activeWrapperPath: appPaths.wrapperPath,
       defaultManagedProfilePath: normalizeProfilePath(appPaths.profilesDir, "chromium"),
@@ -546,36 +869,41 @@ async function autostartBrowserForRequest(): Promise<void> {
 
     const child = spawn(command, args, {
       cwd: repoPaths.repoRoot,
-      env: { ...process.env },
+      env: { ...process.env, [BROC_LAUNCH_SUPERVISOR_ENV]: "1" },
       stdio: "ignore",
       detached: true,
     });
+    trackOwnedAutostartProcess(child);
 
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
 
-      child.once("spawn", () => {
-        settled = true;
-        resolve();
-      });
-
-      child.once("error", (error) => {
-        if (!settled) {
+        child.once("spawn", () => {
           settled = true;
-          reject(error);
-        }
+          resolve();
+        });
+
+        child.once("error", (error) => {
+          if (!settled) {
+            settled = true;
+            reject(error);
+          }
+        });
+
+        child.once("exit", (code) => {
+          if (!settled && code !== null && code !== 0) {
+            settled = true;
+            reject(new Error(`Browser autostart exited before startup completed (code ${code}).`));
+          }
+        });
       });
 
-      child.once("exit", (code) => {
-        if (!settled && code !== null && code !== 0) {
-          settled = true;
-          reject(new Error(`Browser autostart exited before startup completed (code ${code}).`));
-        }
-      });
-    });
-
-    child.unref();
-    await waitForBridgeAfterAutostart();
+      await waitForBridgeAfterAutostart();
+    } catch (error) {
+      await shutdownOwnedAutostartProcess("SIGTERM");
+      throw error;
+    }
   })().finally(() => {
     bridgeAutostartPromise = null;
   });
@@ -609,6 +937,44 @@ async function requestBridge(message: Record<string, unknown>): Promise<unknown>
   return bridge.request(message);
 }
 
+function registerShutdownHandlers(): void {
+  let shuttingDown = false;
+
+  const shutdown = async (signal?: NodeJS.Signals) => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+    await shutdownOwnedAutostartProcess(signal ?? "SIGTERM").catch(() => {});
+    if (signal) {
+      process.exit(0);
+    }
+  };
+
+  process.once("SIGINT", () => {
+    void shutdown("SIGINT");
+  });
+  process.once("SIGTERM", () => {
+    void shutdown("SIGTERM");
+  });
+  process.once("beforeExit", () => {
+    void shutdown();
+  });
+  process.once("exit", () => {
+    if (hasRunningChild(ownedAutostartProcess)) {
+      try {
+        process.kill(-ownedAutostartProcess.pid!, "SIGTERM");
+      } catch {
+        try {
+          ownedAutostartProcess.kill("SIGTERM");
+        } catch {
+          // Ignore already-exited children.
+        }
+      }
+    }
+  });
+}
+
 function rememberBrowserContext(params: { sessionId?: string; tabId?: number }): void {
   if (params.sessionId) lastSessionId = params.sessionId;
   if (params.tabId !== undefined) lastTabId = params.tabId;
@@ -629,6 +995,12 @@ async function executeActionWithSafety(
   action: Action,
   tabId?: number,
 ): Promise<{ type: "text"; text: string }[]> {
+  const task = await ensureNotebookTaskForContext({
+    sessionId: getCurrentSessionId(),
+    tabId,
+    title: "Browser Task",
+  });
+
   // 1. Resolve element context for risk assessment
   const ref = getActionRef(action);
   const elementContext = ref !== undefined ? getElementContext(ref) : undefined;
@@ -661,7 +1033,6 @@ async function executeActionWithSafety(
       timestamp: Date.now(),
     };
 
-    // Record in audit log as pending approval
     const auditId = auditLog.record({
       sessionId: getCurrentSessionId(),
       tabId,
@@ -672,7 +1043,6 @@ async function executeActionWithSafety(
       snapshotVersionBefore: lastSnapshot?.version,
     });
 
-    // Return the approval request to the agent — they must call browser_approve
     await appendBrowserActionEvent({
       action,
       tabId,
@@ -680,6 +1050,13 @@ async function executeActionWithSafety(
       phase: "approval_requested",
       risk,
       approvalId,
+      snapshot: lastSnapshot,
+    });
+    await updateNotebookMeta(appPaths, task.meta.id, { status: "waiting" }).catch(() => {});
+    await syncTaskProgress({
+      taskId: task.meta.id,
+      action,
+      phase: "approval_requested",
       snapshot: lastSnapshot,
     });
 
@@ -697,33 +1074,20 @@ async function executeActionWithSafety(
       lines.push(`**Tags:** ${risk.tags.join(", ")}`);
     }
     lines.push(``);
-    lines.push(`To proceed, call \`browser_approve\` with approvalId: \`${approvalId}\` and decision: \`approve\` or \`deny\`.`);
+    lines.push(`Resolve this with \`browser_approve\` using approval ID \`${approvalId}\` and either \`approve\` or \`deny\`.`);
 
-    // Store the pending approval (action will be executed if approved)
-    const approvalPromise = new Promise<ApprovalDecision>((resolve) => {
-      const timer = setTimeout(() => {
-        pendingApprovals.delete(approvalId);
-        resolve("timeout");
-      }, APPROVAL_TIMEOUT_MS);
-
-      pendingApprovals.set(approvalId, {
-        request: approvalRequest,
-        action,
-        tabId,
-        resolve,
-        timer,
-      });
+    pendingApprovals.set(approvalId, {
+      request: approvalRequest,
+      action,
+      tabId,
+      taskId: task.meta.id,
     });
-
-    // Don't await — just return the approval request
-    // The agent will call browser_approve, which will resolve the promise
-    // and execute the action
 
     return [{ type: "text" as const, text: lines.join("\n") }];
   }
 
   // 5. No approval needed — execute directly
-  return await executeAndLog(action, risk, tabId);
+  return await executeAndLog(action, risk, tabId, task.meta.id);
 }
 
 /**
@@ -733,6 +1097,7 @@ async function executeAndLog(
   action: Action,
   risk: ReturnType<typeof assessRisk>,
   tabId?: number,
+  taskId?: string,
 ): Promise<{ type: "text"; text: string }[]> {
   const startTime = Date.now();
   const isHighRisk = risk.level === "high";
@@ -799,6 +1164,42 @@ async function executeAndLog(
       auditEntry,
       auditEntry.result?.success ? "completed" : "failed",
     );
+  }
+
+  const effectiveTaskId = taskId
+    ?? (await findLinkedNotebookTask({ sessionId: response.sessionId, tabId }))?.meta.id;
+  if (effectiveTaskId) {
+    if (response.result?.success && action.type === "extract" && response.result.data) {
+      const source = response.snapshot?.title || response.snapshot?.url;
+      const results = parseGatheredResults(response.result.data, source);
+      for (const result of results) {
+        await addNotebookGatheredResult(appPaths, effectiveTaskId, result).catch(() => {});
+      }
+    }
+    const screenshotArtifactId = response.result?.success
+      ? await captureNotebookScreenshot({
+        taskId: effectiveTaskId,
+        tabId,
+        sessionId: response.sessionId,
+        reason: "milestone",
+      }).catch(() => undefined)
+      : undefined;
+    await syncTaskProgress({
+      taskId: effectiveTaskId,
+      action,
+      phase: response.result?.success ? "completed" : "failed",
+      snapshot: response.snapshot,
+      resultData: response.result?.data,
+      screenshotArtifactId,
+    }).catch(() => {});
+    await updateNotebookMeta(appPaths, effectiveTaskId, {
+      status: response.result?.success ? "running" : "blocked",
+      sessionId: response.sessionId,
+      tabId,
+    }).catch(() => {});
+    if (response.result?.success) {
+      await synthesizeFinalOutput(effectiveTaskId).catch(() => {});
+    }
   }
 
   // Format response
@@ -868,6 +1269,40 @@ function formatActionResult(
   }
 }
 
+async function resolvePendingApprovalByUser(params: {
+  taskId: string;
+  approvalId: string;
+  decision: "approve" | "deny";
+}): Promise<{ ok: boolean; message: string }> {
+  const pending = pendingApprovals.get(params.approvalId);
+  if (!pending || pending.taskId !== params.taskId) {
+    return { ok: false, message: "Approval request was not found or has already been resolved." };
+  }
+  pendingApprovals.delete(params.approvalId);
+
+  if (params.decision !== "approve") {
+    await updateNotebookMeta(appPaths, params.taskId, { status: "blocked" }).catch(() => {});
+    await appendNotebookEvent(appPaths, params.taskId, {
+      type: "browser.action.denied",
+      actor: "user",
+      payload: { approvalId: params.approvalId, actionType: pending.action.type },
+    }).catch(() => {});
+    return { ok: true, message: `Denied ${pending.action.type}.` };
+  }
+
+  const content = await executeAndLog(
+    pending.action,
+    pending.request.risk,
+    pending.tabId,
+    params.taskId,
+  );
+  await updateNotebookMeta(appPaths, params.taskId, { status: "running" }).catch(() => {});
+  return {
+    ok: true,
+    message: content.map((item) => item.text).join("\n\n") || `Approved ${pending.action.type}.`,
+  };
+}
+
 // ---- MCP Server ----
 
 const server = new McpServer({
@@ -883,7 +1318,7 @@ server.registerPrompt("browse_workflow", {
     role: "user",
     content: {
       type: "text",
-      text: "Use browser_status first when browser readiness is unclear. Use browser_snapshot to inspect the page, act with the smallest safe step, and re-snapshot after every meaningful change.",
+      text: "Start with task_start for any non-trivial task. Gather and preserve relevant links as you work, especially authoritative source pages and useful pages the user may want to reopen, and include the important ones in the final output. Use browser_status when readiness is unclear, act with the smallest safe step, and re-snapshot after every meaningful change.",
     },
   }],
 }));
@@ -910,10 +1345,11 @@ server.registerResource("browser-workflow-guide", "broc://guide/browser-workflow
     uri: "broc://guide/browser-workflow",
     text: [
       "1. Call browser_status if runtime readiness is unclear.",
-      "2. Call browser_snapshot before acting.",
-      "3. Use refs from the latest snapshot for actions.",
-      "4. Re-snapshot after navigation, typing, or clicks that change page state.",
-      "5. Use browser_tabs to recover context if the active tab changes.",
+      "2. Start a notebook-backed task with task_start for complex work.",
+      "3. Gather and retain the important links you discover, and carry the useful ones into the final output.",
+      "4. Use refs from the latest snapshot for actions.",
+      "5. Re-snapshot after navigation, typing, or clicks that change page state.",
+      "6. Use browser_tabs to recover context if the active tab changes.",
     ].join("\n"),
   }],
 }));
@@ -978,6 +1414,7 @@ server.tool(
           totalElements: response.snapshot.totalElements,
         },
       }).catch(() => {});
+
     }
 
     const text = response.snapshot ? formatSnapshot(response.snapshot) : "No snapshot available";
@@ -1223,83 +1660,32 @@ server.tool(
 // -- browser_approve --
 server.tool(
   "browser_approve",
-  "Approve or deny a pending high-risk action. Required when an action triggers the approval gate.",
+  "Approve or deny a pending high-risk action.",
   {
     approvalId: z.string().describe("The approvalId from the approval request"),
-    decision: z.enum(["approve", "deny"]).describe("Whether to approve or deny the action"),
+    decision: z.enum(["approve", "deny"]).describe("Approve to execute the action, or deny to block it."),
   },
   async ({ approvalId, decision }) => {
     const pending = pendingApprovals.get(approvalId);
-
     if (!pending) {
       return {
         content: [{
           type: "text" as const,
-          text: `No pending approval found for ID: ${approvalId}. It may have expired or already been resolved.`,
+          text: "Approval request was not found or has already been resolved.",
         }],
       };
     }
-
-    // Resolve the approval
-    clearTimeout(pending.timer);
-    pendingApprovals.delete(approvalId);
-
-    if (decision === "deny") {
-      // Log the denial
-      const deniedId = auditLog.record({
-        sessionId: getCurrentSessionId(),
-        tabId: pending.tabId,
-        action: pending.action,
-        risk: pending.request.risk,
-        approvalRequested: true,
-        approval: {
-          approvalId,
-          decision: "deny",
-          decidedBy: "agent",
-          timestamp: Date.now(),
-        },
-        pageUrl: pending.request.pageUrl,
-      });
-
-      const denied = auditLog.getRecent(1).find((entry) => entry.entryId === deniedId);
-      if (denied) {
-        await appendBrowserActionEvent({
-          action: denied.action,
-          tabId: denied.tabId,
-          sessionId: denied.sessionId,
-          phase: "denied",
-          risk: denied.risk,
-          approvalId,
-          snapshot: lastSnapshot,
-        });
-      }
-
-      return {
-        content: [{
-          type: "text" as const,
-          text: `Action denied: ${pending.request.description}`,
-        }],
-      };
-    }
-
-    // Approved — execute the action
-    await appendBrowserActionEvent({
-      action: pending.action,
-      tabId: pending.tabId,
-      sessionId: getCurrentSessionId(),
-      phase: "approved",
-      risk: pending.request.risk,
+    const result = await resolvePendingApprovalByUser({
+      taskId: pending.taskId,
       approvalId,
-      snapshot: lastSnapshot,
+      decision,
     });
-
-    const content = await executeAndLog(
-      pending.action,
-      pending.request.risk,
-      pending.tabId,
-    );
-
-    return { content };
+    return {
+      content: [{
+        type: "text" as const,
+        text: result.message,
+      }],
+    };
   }
 );
 
@@ -1372,6 +1758,30 @@ server.tool(
 );
 
 server.tool(
+  "task_start",
+  "Create a notebook-backed browser task with an initial plan and optional browser linkage.",
+  {
+    title: z.string().describe("Human-readable task title"),
+    task: z.string().describe("Original user task"),
+    tags: z.array(z.string()).optional().describe("Optional task tags"),
+    sessionId: z.string().optional().describe("Optional linked browser session ID"),
+    tabId: z.number().optional().describe("Optional linked browser tab ID"),
+    open: z.boolean().optional().describe("Open the notebook UI after creation"),
+  },
+  async ({ title, task, tags, sessionId, tabId, open }) => {
+    const notebook = await createManagedNotebookTask({ title, task, tags, sessionId, tabId, open });
+    await setNotebookSummary(appPaths, notebook.meta.id, task).catch(() => {});
+    await updateNotebookMeta(appPaths, notebook.meta.id, { status: "running" }).catch(() => {});
+    return {
+      content: [{
+        type: "text" as const,
+        text: `Created managed task ${notebook.meta.id}\n\n${summarizeNotebookTask(notebook)}`,
+      }],
+    };
+  }
+);
+
+server.tool(
   "notebook_create",
   "Create a persistent task notebook for a long-running task.",
   {
@@ -1385,7 +1795,17 @@ server.tool(
   },
   async ({ id, title, goal, tags, sessionId, tabId, open }) => {
     await ensureNotebookStore(appPaths);
-    const task = await createNotebookTask(appPaths, { id, title, goal, tags, sessionId, tabId });
+    const task = await createNotebookTask(appPaths, {
+      id,
+      title,
+      goal,
+      task: goal ?? title,
+      tags,
+      sessionId,
+      tabId,
+      plan: deriveInitialPlan(goal ?? title),
+    });
+    await setNotebookSummary(appPaths, task.meta.id, goal ?? title).catch(() => {});
     bindNotebookTask(task.meta.id, { sessionId: task.meta.sessionId, tabId: task.meta.tabId });
     if (open) {
       await openNotebookWindow(task.meta.id).catch(() => {});
@@ -1414,6 +1834,101 @@ server.tool(
     const meta = await updateNotebookMeta(appPaths, taskId, { title, status, tags, sessionId, tabId });
     bindNotebookTask(meta.id, { sessionId: meta.sessionId, tabId: meta.tabId });
     return { content: [{ type: "text" as const, text: `Updated notebook ${meta.id} [${meta.status}]` }] };
+  }
+);
+
+server.tool(
+  "notebook_set_summary",
+  "Set the primary notebook summary shown in the header and synthesized view.",
+  {
+    taskId: z.string().describe("Notebook task ID"),
+    summary: z.string().describe("Primary summary text"),
+  },
+  async ({ taskId, summary }) => {
+    await setNotebookSummary(appPaths, taskId, summary);
+    return { content: [{ type: "text" as const, text: `Updated notebook summary for ${taskId}` }] };
+  }
+);
+
+server.tool(
+  "notebook_add_highlight",
+  "Add or replace a synthesized notebook highlight.",
+  {
+    taskId: z.string().describe("Notebook task ID"),
+    id: z.string().describe("Stable highlight ID"),
+    label: z.string().describe("Highlight label"),
+    value: z.string().describe("Highlight value"),
+  },
+  async ({ taskId, id, label, value }) => {
+    await addNotebookHighlight(appPaths, taskId, { id, label, value });
+    return { content: [{ type: "text" as const, text: `Updated highlight ${id} for ${taskId}` }] };
+  }
+);
+
+server.tool(
+  "notebook_add_suggested_action",
+  "Add or replace a synthesized suggested action for the notebook UI.",
+  {
+    taskId: z.string().describe("Notebook task ID"),
+    id: z.string().describe("Stable action ID"),
+    label: z.string().describe("Action label"),
+    kind: z.enum(["open_url", "focus_tab", "view_artifact", "dismiss"]).describe("Suggested action kind"),
+    payload: z.string().optional().describe("Optional JSON object string payload"),
+  },
+  async ({ taskId, id, label, kind, payload }) => {
+    await addNotebookSuggestedAction(appPaths, taskId, {
+      id,
+      label,
+      kind,
+      payload: payload ? tryJsonParse<Record<string, unknown>>(payload, {}) : undefined,
+    });
+    return { content: [{ type: "text" as const, text: `Updated suggested action ${id} for ${taskId}` }] };
+  }
+);
+
+server.tool(
+  "notebook_add_section",
+  "Add or replace a typed custom notebook section in a target tab.",
+  {
+    taskId: z.string().describe("Notebook task ID"),
+    id: z.string().describe("Stable section ID"),
+    title: z.string().describe("Section title"),
+    kind: z.enum(["text", "markdown", "key_value", "list", "table", "code", "json", "diff", "checklist", "metrics", "links", "media", "timeline", "artifact_gallery", "html"]).describe("Section renderer kind"),
+    tab: z.enum(["final-output"]).optional().describe("Notebook tab placement"),
+    content: z.string().describe("JSON value or plain string content for the section"),
+  },
+  async ({ taskId, id, title, kind, tab, content }) => {
+    const parsed = tryJsonParse<unknown>(content, content);
+    await upsertNotebookSection(appPaths, taskId, {
+      id,
+      title,
+      kind,
+      tab: tab as NotebookTabId | undefined,
+      content: parsed,
+    });
+    return { content: [{ type: "text" as const, text: `Updated section ${id} for ${taskId}` }] };
+  }
+);
+
+server.tool(
+  "notebook_add_result",
+  "Add a typed gathered result that the notebook will synthesize into the final output display.",
+  {
+    taskId: z.string().describe("Notebook task ID"),
+    label: z.string().describe("Result label"),
+    value: z.string().describe("Result value"),
+    source: z.string().optional().describe("Optional source label"),
+    fields: z.string().optional().describe("Optional JSON object string for tabular fields"),
+  },
+  async ({ taskId, label, value, source, fields }) => {
+    const parsedFields = fields ? tryJsonParse<Record<string, string>>(fields, {}) : undefined;
+    const result = await addNotebookGatheredResult(appPaths, taskId, {
+      label,
+      value,
+      source,
+      fields: parsedFields,
+    });
+    return { content: [{ type: "text" as const, text: `Added result ${result.id} to ${taskId}` }] };
   }
 );
 
@@ -1492,6 +2007,41 @@ server.tool(
 );
 
 server.tool(
+  "task_finalize",
+  "Finalize a notebook-backed task with a user-facing summary and gathered information.",
+  {
+    taskId: z.string().describe("Notebook task ID"),
+    summary: z.string().describe("Final summary shown to the user"),
+    details: z.string().optional().describe("Longer gathered information"),
+  },
+  async ({ taskId, summary, details }) => {
+    const task = await loadNotebookTask(appPaths, taskId);
+    const finalScreenshotArtifactId = await captureNotebookScreenshot({
+      taskId,
+      tabId: task.meta.tabId,
+      sessionId: task.meta.sessionId,
+      reason: "final",
+    }).catch(() => undefined);
+    await setNotebookWorkflow(appPaths, taskId, {
+      merge: false,
+      value: {
+        ...task.workflow,
+        finalOutput: {
+          ...task.workflow.finalOutput,
+          summary,
+          details,
+          gathered: task.workflow.gatheredResults ?? task.workflow.finalOutput?.gathered,
+          screenshotArtifactId: finalScreenshotArtifactId ?? task.workflow.finalOutput?.screenshotArtifactId,
+        },
+      },
+    });
+    await setNotebookSummary(appPaths, taskId, summary).catch(() => {});
+    await updateNotebookMeta(appPaths, taskId, { status: "completed" });
+    return { content: [{ type: "text" as const, text: `Finalized task ${taskId}` }] };
+  }
+);
+
+server.tool(
   "notebook_list",
   "List all persistent notebook tasks.",
   {},
@@ -1517,8 +2067,13 @@ server.tool(
 // ---- Start server ----
 
 async function main(): Promise<void> {
+  registerShutdownHandlers();
   await ensureNotebookStore(appPaths);
   await hydrateNotebookTaskBindings();
+  registerNotebookServerHooks(
+    { appPaths, repoPaths, stateKey: "embedded" },
+    {},
+  );
   bridge.onEvent((message) => {
     const event = message as { event?: string; sessionId?: string; tabId?: number; url?: string; type?: string };
     const sessionId = event.sessionId;

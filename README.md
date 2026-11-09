@@ -63,10 +63,12 @@ The installed runtime exposes:
 
 Broc now ships with a persistent notebook feature for long-running tasks.
 
-- Agents can create and update notebooks with MCP tools such as `notebook_create`, `notebook_update`, `notebook_set_view`, `notebook_append_event`, `notebook_add_artifact`, `notebook_get`, `notebook_list`, and `notebook_open`.
+- Agents can create and update notebooks with MCP tools such as `task_start`, `task_finalize`, `notebook_create`, `notebook_update`, `notebook_set_summary`, `notebook_add_result`, `notebook_add_highlight`, `notebook_add_suggested_action`, `notebook_add_section`, `notebook_append_event`, `notebook_add_artifact`, `notebook_get`, `notebook_list`, and `notebook_open`.
 - Notebooks persist across restarts under the Broc data directory.
 - The user-facing notebook UI is served locally by the MCP server and opens in the managed browser.
 - Each task has its own durable notebook record, while the UI presents a unified task list for switching between tasks.
+- The notebook renders a single primary output view, with supporting sections and timeline shown inline on the same page.
+- Agents should gather and preserve the important links they discover and carry the important ones into the final output.
 
 Persistent notebook storage lives here:
 

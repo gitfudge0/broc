@@ -2,6 +2,7 @@ import { mkdtemp, writeFile, rm } from "fs/promises";
 import { tmpdir } from "os";
 import { resolve } from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { spawn } from "child_process";
 import { buildChromiumLaunchPlan, buildFirefoxLaunchPlan, DEFAULT_LAUNCH_URL, spawnLaunchPlan } from "../cli/launch.js";
 import type { RepoPaths } from "../cli/paths.js";
 import type { BrowserSetupState, ManagedChromiumState } from "../cli/state.js";
@@ -159,5 +160,10 @@ describe("launch plan builders", () => {
       env: process.env,
     });
     expect(child).toEqual({ pid: 999 });
+    expect(spawn).toHaveBeenCalledWith("/bin/browser", ["--flag"], expect.objectContaining({
+      cwd: "/repo",
+      detached: process.platform !== "win32",
+      stdio: "inherit",
+    }));
   });
 });

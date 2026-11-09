@@ -12,16 +12,14 @@ import { layoutShell, layoutShellCSS } from "./components/layout-shell";
 import { sidebar, sidebarCSS } from "./components/sidebar";
 import { taskListItemCSS } from "./components/task-list-item";
 import { taskHeader, taskHeaderCSS } from "./components/task-header";
-import { highlightStrip, highlightStripCSS } from "./components/highlight-strip";
 import { timeline, timelineCSS } from "./components/timeline";
 import { sectionList, sectionCardCSS } from "./components/section-card";
-import { artifactGallery, artifactGalleryCSS } from "./components/artifact-gallery";
 import { statusBadgeCSS } from "./components/status-badge";
 import { tagPillCSS } from "./components/tag-pill";
 import { emptyState, emptyStateCSS } from "./components/empty-state";
 import { paginationCSS } from "./components/pagination";
 import { themeToggleCSS, bindThemeToggle } from "./components/theme-toggle";
-import { createShowcaseTask, createShowcaseTaskSummary, SHOWCASE_TASK_ID } from "./showcase";
+import { createShowcaseTask, SHOWCASE_TASK_ID } from "./showcase";
 
 type NotebookTaskStatus = "pending" | "running" | "waiting" | "blocked" | "completed" | "failed" | "archived";
 
@@ -41,6 +39,7 @@ interface NotebookSection {
   id: string;
   title: string;
   kind: string;
+  tab?: "final-output";
   content: unknown;
 }
 
@@ -63,6 +62,16 @@ interface NotebookTaskRecord {
     artifacts: Array<{ id: string; name: string; kind: string; mimeType?: string; size: number; createdAt: string; href?: string; thumbnailSrc?: string }>;
   };
   view: NotebookView;
+  workflow: {
+    milestones?: Array<{ id: string; title: string; summary: string; createdAt: string; screenshotArtifactId?: string }>;
+    gatheredResults?: Array<{ id: string; label: string; value: string; source?: string; fields?: Record<string, string> }>;
+    finalOutput?: {
+      summary?: string;
+      details?: string;
+      gathered?: Array<{ id?: string; label: string; value: string; source?: string; fields?: Record<string, string> }>;
+      screenshotArtifactId?: string;
+    };
+  };
   events?: Array<{ id: string; type: string; createdAt: string; actor: string; payload: Record<string, unknown> }>;
 }
 
@@ -91,10 +100,8 @@ function allStyles(): string {
     emptyStateCSS,
     paginationCSS,
     taskHeaderCSS,
-    highlightStripCSS,
     timelineCSS,
     sectionCardCSS,
-    artifactGalleryCSS,
     mainContentCSS,
     themeToggleCSS,
   ].join("\n");
@@ -114,32 +121,6 @@ const mainContentCSS = /* css */ `
   gap: var(--sp-6);
 }
 
-.content-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-}
-
-.content-action {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  text-decoration: none;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  background: transparent;
-  transition: border-color 0.15s, color 0.15s;
-}
-
-.content-action:hover {
-  border-color: var(--border-strong);
-  color: var(--text-primary);
-}
-
 .content-timeline {
   margin-top: var(--sp-6);
   padding-top: var(--sp-4);
@@ -155,6 +136,102 @@ const mainContentCSS = /* css */ `
   color: var(--text-muted);
   padding-bottom: var(--sp-3);
   margin-bottom: var(--sp-3);
+}
+
+.task-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.task-tab {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.task-tab[aria-selected="true"] {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+  background: var(--surface-muted);
+}
+
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.workflow-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-5);
+}
+
+.workflow-panel__title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: var(--sp-3);
+}
+
+.milestone-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.milestone-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-4);
+  background: var(--surface-muted);
+}
+
+.markdown-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-6);
+}
+
+.markdown-panel__body {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+.markdown-panel__body p:first-child {
+  margin-top: 0;
+}
+
+.markdown-panel__body p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-panel__body h1,
+.markdown-panel__body h2,
+.markdown-panel__body h3,
+.markdown-panel__body h4 {
+  color: var(--text-primary);
+  margin: var(--sp-5) 0 var(--sp-2);
+}
+
+.markdown-panel__body ul,
+.markdown-panel__body ol {
+  padding-left: var(--sp-5);
+}
+
+.markdown-panel__body code {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
 }
 `;
 
@@ -200,6 +277,7 @@ function normalizeView(view: NotebookView): NotebookView {
         id: typeof section?.id === "string" && section.id ? section.id : `section-${index}`,
         title: typeof section?.title === "string" && section.title ? section.title : `Section ${index + 1}`,
         kind: typeof section?.kind === "string" && section.kind ? section.kind : inferSectionKind(section?.content),
+        tab: typeof section?.tab === "string" ? "final-output" : undefined,
         content: section?.content,
       }))
     : [];
@@ -239,14 +317,62 @@ function normalizeView(view: NotebookView): NotebookView {
   };
 }
 
-function renderSuggestedActions(view: NotebookView): string {
-  if (!Array.isArray(view.suggestedActions) || view.suggestedActions.length === 0) return "";
+function getSection(view: NotebookView, id: string): NotebookSection | null {
+  return (view.sections || []).find((section) => section.id === id) ?? null;
+}
+
+function renderMarkdownPanel(content: unknown): string {
+  const escaped = escapeHtml(String(content || ""));
+  const html = escaped
+    .replace(/^### (.+)$/gm, "<h4>$1</h4>")
+    .replace(/^## (.+)$/gm, "<h3>$1</h3>")
+    .replace(/^# (.+)$/gm, "<h2>$1</h2>")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/\n\n+/g, "</p><p>")
+    .replace(/\n/g, "<br />");
+  return `<div class="markdown-panel"><div class="markdown-panel__body"><p>${html}</p></div></div>`;
+}
+
+
+function renderMilestones(task: NotebookTaskRecord): string {
+  const milestones = task.workflow.milestones || [];
+  if (milestones.length === 0) return "";
   return `
-    <div class="content-actions">
-      ${view.suggestedActions.map((action) => {
-        const href = typeof action.payload?.url === "string" ? action.payload.url : "#";
-        return `<a class="content-action" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(action.label)}</a>`;
-      }).join("")}
+    <div class="workflow-panel">
+      <div class="workflow-panel__title">Milestones</div>
+      <div class="milestone-list">
+        ${milestones.map((milestone) => `
+          <div class="milestone-card">
+            <strong>${escapeHtml(milestone.title)}</strong>
+            <p class="body-sm">${escapeHtml(milestone.summary)}</p>
+            ${milestone.screenshotArtifactId ? `<img src="${escapeHtml(`${API_BASE}/task/${encodeURIComponent(task.meta.id)}/artifact/${encodeURIComponent(milestone.screenshotArtifactId)}`)}" alt="${escapeHtml(milestone.title)}" loading="lazy" />` : ""}
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderFinalOutputTab(task: NotebookTaskRecord, view: NotebookView): string {
+  const finalSection = getSection(view, "final-output");
+  const supportingSections = (view.sections || []).filter((section) => section.id !== "final-output");
+
+  return `
+    <div class="tab-panel">
+      ${finalSection ? renderMarkdownPanel(finalSection.content) : emptyState({ message: "No final output yet", hint: "Task details and summary will appear here." })}
+      ${supportingSections.length > 0 ? `
+        <div class="workflow-panel">
+          <div class="workflow-panel__title">Supporting Sections</div>
+          ${sectionList({ sections: supportingSections })}
+        </div>
+      ` : ""}
+      ${renderMilestones(task)}
+      <div class="workflow-panel">
+        <div class="workflow-panel__title">Timeline</div>
+        ${timeline({ events: task.events || [] })}
+      </div>
     </div>
   `;
 }
@@ -258,44 +384,35 @@ function renderMainContent(task: NotebookTaskRecord | null): string {
 
   const view = normalizeView(task.view);
   const header = taskHeader({
+    taskId: task.meta.id,
     title: task.meta.title,
     summary: view.summary,
     status: task.meta.status,
     createdAt: task.meta.createdAt,
     updatedAt: task.meta.updatedAt,
     tags: task.meta.tags,
+    deletable: !isShowcaseTask(task.meta.id),
   });
-  const highlights = highlightStrip({ items: view.highlights || [] });
-  const actions = renderSuggestedActions(view);
-  const sections = sectionList({ sections: view.sections || [] });
-  const artifacts = artifactGallery({
-    artifacts: task.meta.artifacts,
-    taskId: task.meta.id,
-    apiBase: API_BASE,
-  });
-  const tl = timeline({ events: task.events || [] });
-
   return `
     ${header}
-    ${highlights}
     <div class="content-body">
-      ${actions}
-      ${sections}
-      ${task.meta.artifacts.length > 0 ? artifacts : ""}
-    </div>
-    <div class="content-timeline">
-      <div class="content-timeline__header">Timeline</div>
-      ${tl}
+      ${renderFinalOutputTab(task, view)}
     </div>
   `;
 }
 
 function withShowcaseTask(tasks: NotebookTaskSummary[]): NotebookTaskSummary[] {
-  return [createShowcaseTaskSummary(), ...tasks.filter((task) => task.id !== SHOWCASE_TASK_ID)];
+  return tasks.filter((task) => task.id !== SHOWCASE_TASK_ID);
 }
 
 function isShowcaseTask(taskId: string | null): boolean {
   return taskId === SHOWCASE_TASK_ID;
+}
+
+function resolveDefaultTaskId(tasks: NotebookTaskSummary[], selectedTaskId: string | null): string | null {
+  if (selectedTaskId) return selectedTaskId;
+  const firstRealTask = tasks.find((task) => task.id !== SHOWCASE_TASK_ID);
+  return firstRealTask?.id ?? tasks[0]?.id ?? null;
 }
 
 function bindInteractions(): void {
@@ -314,18 +431,24 @@ function bindInteractions(): void {
     button.addEventListener("click", async (e) => {
       e.stopPropagation();
       const taskId = button.dataset.deleteTaskId;
+      const taskTitle = button.dataset.deleteTaskTitle || "this notebook";
       if (!taskId || isShowcaseTask(taskId)) return;
+      const confirmed = window.confirm(`Delete ${taskTitle}? This cannot be undone.`);
+      if (!confirmed) return;
       try {
         const resp = await fetch(`${API_BASE}/task/${encodeURIComponent(taskId)}`, { method: "DELETE", credentials: "same-origin" });
         if (!resp.ok) throw new Error(`Delete failed: ${resp.status}`);
         const url = new URL(window.location.href);
-        url.searchParams.delete("task");
+        if (url.searchParams.get("task") === taskId) {
+          url.searchParams.delete("task");
+        }
         window.location.href = url.toString();
       } catch (err) {
         console.error("Failed to delete task", err);
       }
     });
   });
+
 }
 
 function bindSidebarCollapse(): void {
@@ -389,7 +512,7 @@ async function load(): Promise<void> {
   const search = new URLSearchParams(window.location.search);
   const selectedTaskId = search.get("task");
   const tasks = withShowcaseTask(await requestJson<NotebookTaskSummary[]>(`${API_BASE}/tasks`));
-  const resolvedTaskId = selectedTaskId || tasks[0]?.id || null;
+  const resolvedTaskId = resolveDefaultTaskId(tasks, selectedTaskId);
 
   let selectedTask: NotebookTaskRecord | null = null;
   if (resolvedTaskId) {

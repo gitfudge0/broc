@@ -2,6 +2,7 @@ import { attachTerminationHandlers, terminateProcesses, waitForBridgeOrBrowserEx
 
 export interface LaunchSessionOptions {
   startMcp: boolean;
+  keepAliveOnNoMcp?: boolean;
 }
 
 export interface LaunchSessionDeps {
@@ -24,7 +25,9 @@ export async function orchestrateLaunchSession(
   await deps.openLaunchUrl();
 
   if (!options.startMcp) {
-    browserProcess.unref?.();
+    if (!options.keepAliveOnNoMcp) {
+      browserProcess.unref?.();
+    }
     return;
   }
 

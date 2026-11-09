@@ -9,6 +9,7 @@ import {
   buildFirefoxLaunchPlan,
   DEFAULT_LAUNCH_URL,
   spawnLaunchPlan,
+  terminateProcess,
   waitForBridgeReady,
   waitForChildSpawn,
 } from "./cli/launch.js";
@@ -62,6 +63,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repoPaths = getRepoPaths(__dirname);
 const appPaths = getAppPaths();
+const BROC_LAUNCH_SUPERVISOR_ENV = "BROC_LAUNCH_SUPERVISOR";
 
 function getLoadStateOptions() {
   return {
@@ -76,17 +78,65 @@ function parseUrlFlag(argv: string[]): string | undefined {
   return urlArg.slice("--url=".length);
 }
 
-function stopProcess(child: { kill(signal?: NodeJS.Signals): boolean } | null | undefined, signal: NodeJS.Signals = "SIGTERM"): void {
-  if (!child) return;
-  try {
-    child.kill(signal);
-  } catch {
-    // Ignore already-exited child processes.
-  }
-}
-
 function resolveLaunchUrl(url?: string): string {
   return url || DEFAULT_LAUNCH_URL;
+}
+
+function shouldKeepBrowserSupervisorAlive(startMcp: boolean): boolean {
+  return !startMcp && process.env[BROC_LAUNCH_SUPERVISOR_ENV] === "1";
+}
+
+async function waitForBrowserSupervisor(
+  browserProcess: ChildProcess | null,
+  label: string,
+): Promise<void> {
+  if (!browserProcess) {
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+
+    const cleanup = () => {
+      process.off("SIGINT", handleSigint);
+      process.off("SIGTERM", handleSigterm);
+    };
+
+    const settle = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      callback();
+    };
+
+    const shutdown = (signal: NodeJS.Signals) => {
+      void terminateProcess(browserProcess, { signal }).finally(() => {
+        settle(resolve);
+      });
+    };
+
+    const handleSigint = () => shutdown("SIGINT");
+    const handleSigterm = () => shutdown("SIGTERM");
+
+    process.on("SIGINT", handleSigint);
+    process.on("SIGTERM", handleSigterm);
+
+    browserProcess.once("error", (error) => {
+      settle(() => reject(error));
+    });
+
+    browserProcess.once("exit", (code, signal) => {
+      settle(() => {
+        if (signal || code === 0 || code === null) {
+          resolve();
+        } else {
+          reject(new Error(`${label} exited with code ${code}`));
+        }
+      });
+    });
+  });
 }
 
 interface ExtensionStatusInfo {
@@ -313,6 +363,7 @@ async function buildBrowserStatusJson(): Promise<import("./shared/bridge-status.
 
 function spawnMcpServerProcess(): ChildProcess {
   return spawn("node", [repoPaths.mcpServerPath], {
+    detached: process.platform !== "win32",
     stdio: "inherit",
     env: { ...process.env },
   });
@@ -399,6 +450,7 @@ async function launchCommand(
   options: { startMcp?: boolean } = {},
 ): Promise<void> {
   const startMcp = options.startMcp ?? true;
+  const keepAliveOnNoMcp = shouldKeepBrowserSupervisorAlive(startMcp);
   const launchUrl = resolveLaunchUrl(url);
   await ensureDistReady({ includeFirefox: browser === "firefox" });
   const state = await loadRepoSetupState();
@@ -434,7 +486,7 @@ async function launchCommand(
 
   try {
     await orchestrateLaunchSession(
-      { startMcp },
+      { startMcp, keepAliveOnNoMcp },
       {
         spawnBrowser: () => browserProcess!,
         spawnMcpServer: () => spawnMcpServerProcess(),
@@ -444,11 +496,14 @@ async function launchCommand(
       },
     );
   } catch (error) {
-    stopProcess(browserProcess, "SIGTERM");
+    await terminateProcess(browserProcess, { signal: "SIGTERM" });
     throw error;
   }
 
   if (!startMcp) {
+    if (keepAliveOnNoMcp) {
+      await waitForBrowserSupervisor(browserProcess, `${browser} browser`);
+    }
     return;
   }
 }

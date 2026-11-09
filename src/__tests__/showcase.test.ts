@@ -11,28 +11,18 @@ describe("showcase task", () => {
     expect(summary.title).toContain("Component Showcase");
   });
 
-  it("includes examples for every supported section kind", () => {
+  it("models the simplified markdown-first notebook layout", () => {
     const task = createShowcaseTask();
-    const kinds = task.view.sections.map((section) => section.kind);
+    const sectionIds = task.view.sections.map((section) => section.id);
 
-    expect(kinds).toEqual([
-      "text",
-      "markdown",
-      "key_value",
-      "list",
-      "checklist",
-      "metrics",
-      "links",
-      "table",
-      "code",
-      "json",
-      "diff",
-      "media",
-      "html",
-      "timeline",
-      "artifact_gallery",
-    ]);
+    expect(sectionIds).toEqual(["final-output", "supporting-notes"]);
+    expect(task.view.sections[0].kind).toBe("markdown");
     expect(task.meta.artifacts).toHaveLength(2);
     expect(task.events.length).toBeGreaterThanOrEqual(5);
+    expect(task.workflow.gatheredResults).toHaveLength(1);
+    expect(task.workflow.finalOutput.summary).toContain("Showcase task completed");
+    expect(task.workflow.finalOutput.screenshotArtifactId).toBe("showcase-image");
+    expect(task.workflow.milestones[0].screenshotArtifactId).toBe("showcase-image");
+    expect(task.workflow.gatheredResults[0].fields?.Song).toBe("Rockstar");
   });
 });

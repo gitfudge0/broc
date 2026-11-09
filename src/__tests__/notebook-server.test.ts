@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "fs/promises";
 import { tmpdir } from "os";
 import { resolve } from "path";
-import { closeNotebookServer, getStandaloneNotebookUrl, startNotebookServer } from "../notebook/server.js";
+import {
+  closeNotebookServer,
+  getStandaloneNotebookUrl,
+  startNotebookServer,
+} from "../notebook/server.js";
 import type { AppPaths, RepoPaths } from "../cli/paths.js";
 
 const tempDirs: string[] = [];
@@ -84,5 +88,33 @@ describe("notebook server helpers", () => {
   it("builds standalone notebook urls", () => {
     expect(getStandaloneNotebookUrl({ port: 43123 })).toBe("http://127.0.0.1:43123/notebook.html");
     expect(getStandaloneNotebookUrl({ port: 43123, taskId: "task 1" })).toBe("http://127.0.0.1:43123/notebook.html?task=task%201");
+  });
+
+  it("rejects unsupported notebook POST endpoints", async () => {
+    const { appPaths, repoPaths } = await makePaths();
+
+    const started = await startNotebookServer({
+      appPaths,
+      repoPaths,
+      host: "127.0.0.1",
+      port: 0,
+      stateKey: "test-settings",
+    });
+
+    const response = await fetch(`http://127.0.0.1:${started.port}/notebook-api/settings`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ unsupported: true }),
+    });
+
+    expect(response.status).toBe(405);
+
+    await closeNotebookServer({
+      appPaths,
+      repoPaths,
+      host: "127.0.0.1",
+      port: 0,
+      stateKey: "test-settings",
+    });
   });
 });

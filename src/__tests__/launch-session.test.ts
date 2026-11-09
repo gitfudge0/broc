@@ -95,9 +95,52 @@ describe("attachTerminationHandlers", () => {
 
     cleanup();
   });
+
+  it("targets process groups on Unix when child pids are available", () => {
+    const browser = new FakeProcess(4321);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+
+    const cleanup = attachTerminationHandlers([browser], (signal, handler) => {
+      if (signal === "SIGTERM") {
+        handler();
+      }
+    });
+
+    if (process.platform !== "win32") {
+      expect(processKill).toHaveBeenCalledWith(-4321, "SIGTERM");
+      expect(browser.kill).not.toHaveBeenCalled();
+    } else {
+      expect(browser.kill).toHaveBeenCalledWith("SIGTERM");
+    }
+    cleanup();
+    processKill.mockRestore();
+  });
 });
 
 describe("terminateProcess", () => {
+  it("signals the process group before falling back to the direct child", async () => {
+    const child = new FakeProcess(2468);
+    const processKill = vi.spyOn(process, "kill").mockImplementation(() => {
+      child.exitCode = 0;
+      child.signalCode = "SIGTERM";
+      queueMicrotask(() => {
+        child.emit("exit", 0, "SIGTERM");
+      });
+      return true;
+    });
+
+    await terminateProcess(child, { timeoutMs: 5, forceTimeoutMs: 5 });
+
+    if (process.platform !== "win32") {
+      expect(processKill).toHaveBeenCalledWith(-2468, "SIGTERM");
+      expect(child.kill).not.toHaveBeenCalled();
+    } else {
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    }
+
+    processKill.mockRestore();
+  });
+
   it("force-kills a child when graceful shutdown times out", async () => {
     vi.useFakeTimers();
     const child = new HungProcess();
@@ -171,6 +214,24 @@ describe("orchestrateLaunchSession", () => {
     expect(spawnMcpServer).not.toHaveBeenCalled();
     expect(openLaunchUrl).toHaveBeenCalledOnce();
     expect(browser.unref).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the browser child referenced for supervised --no-mcp sessions", async () => {
+    const browser = new FakeProcess();
+
+    await orchestrateLaunchSession(
+      { startMcp: false, keepAliveOnNoMcp: true },
+      {
+        spawnBrowser: () => browser,
+        spawnMcpServer: () => new FakeProcess(),
+        waitForChildSpawn: async () => {},
+        waitForBridge: async () => {},
+        openLaunchUrl: async () => {},
+        attachSignalHandlers: () => () => {},
+      },
+    );
+
+    expect(browser.unref).not.toHaveBeenCalled();
   });
 
   it("settles after forwarding SIGTERM to browser and MCP children", async () => {

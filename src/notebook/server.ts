@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "http";
+import { createServer, type ServerResponse } from "http";
 import { readFile } from "fs/promises";
 import { resolve } from "path";
 import type { AppPaths, RepoPaths } from "../cli/paths.js";
@@ -14,6 +14,7 @@ interface NotebookServerState {
   server: ReturnType<typeof createServer> | null;
   port: number | null;
   readyPromise: Promise<number> | null;
+  hooks?: NotebookServerHooks;
 }
 
 interface NotebookServerParams {
@@ -25,6 +26,9 @@ interface NotebookServerListenOptions extends NotebookServerParams {
   host?: string;
   port?: number;
   stateKey?: string;
+}
+
+interface NotebookServerHooks {
 }
 
 const serverStates = new Map<string, NotebookServerState>();
@@ -42,10 +46,19 @@ function getState(appPaths: AppPaths, repoPaths: RepoPaths, stateKey?: string): 
       server: null,
       port: null,
       readyPromise: null,
+      hooks: undefined,
     };
     serverStates.set(key, state);
   }
   return state;
+}
+
+export function registerNotebookServerHooks(
+  params: { appPaths: AppPaths; repoPaths: RepoPaths; stateKey?: string },
+  hooks: NotebookServerHooks,
+): void {
+  const state = getState(params.appPaths, params.repoPaths, params.stateKey);
+  state.hooks = hooks;
 }
 
 function buildNotebookUrl(port: number, taskId?: string, host = DEFAULT_NOTEBOOK_HOST): string {
@@ -67,9 +80,15 @@ function notFound(res: ServerResponse): void {
 async function notebookApiHandler(
   req: IncomingMessage,
   res: ServerResponse,
-  params: { appPaths: AppPaths; repoPaths: RepoPaths; port: number },
+  params: { appPaths: AppPaths; repoPaths: RepoPaths; port: number; hooks?: NotebookServerHooks },
 ): Promise<void> {
   const url = new URL(req.url || "/", `http://127.0.0.1:${params.port}`);
+
+  if (req.method === "POST") {
+    res.writeHead(405, { "content-type": "text/plain; charset=utf-8" });
+    res.end("Method not allowed");
+    return;
+  }
 
   if (req.method === "DELETE") {
     const deleteMatch = url.pathname.match(/^\/notebook-api\/task\/([^/]+)$/);
@@ -177,7 +196,7 @@ export async function startNotebookServer(params: NotebookServerListenOptions): 
     const server = createServer((req, res) => {
       const address = server.address();
       const port = address && typeof address !== "string" ? address.port : 0;
-      notebookApiHandler(req, res, { ...params, port }).catch((error) => {
+      notebookApiHandler(req, res, { ...params, port, hooks: state.hooks }).catch((error) => {
         res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
         res.end(error instanceof Error ? error.message : String(error));
       });

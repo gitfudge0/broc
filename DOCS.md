@@ -301,11 +301,33 @@ All mutating actions return a fresh snapshot after execution.
 
 Notebook tools manage persistent task workspaces stored under Broc's data directory.
 
+Notebook data is split into three layers:
+- workflow state: plan, milestones, gathered results, final output
+- presentation state: summary, highlights, suggested actions, and tab-aware custom sections
+- rendered view: the synthesized notebook UI payload served to the browser
+
+The main notebook page is rendered as a single markdown document synthesized from workflow state, with supporting sections and timeline shown inline. For normal agent flows, preserve useful URLs in the final output when they matter to the user.
+
 **`notebook_create`** — Create a new persistent task notebook.
 - Params: `id?`, `title`, `goal?`, `tags?`, `sessionId?`, `tabId?`, `open?`
 
 **`notebook_update`** — Update task metadata.
 - Params: `taskId`, `title?`, `status?`, `tags?`, `sessionId?`, `tabId?`
+
+**`notebook_set_summary`** — Set the primary synthesized notebook summary.
+- Params: `taskId`, `summary`
+
+**`notebook_add_result`** — Add a gathered result for synthesized final-output rendering.
+- Params: `taskId`, `label`, `value`, `source?`, `fields?` (JSON string)
+
+**`notebook_add_highlight`** — Add or replace a synthesized notebook highlight.
+- Params: `taskId`, `id`, `label`, `value`
+
+**`notebook_add_suggested_action`** — Add or replace a synthesized suggested action.
+- Params: `taskId`, `id`, `label`, `kind`, `payload?` (JSON string)
+
+**`notebook_add_section`** — Add or replace a typed custom section in a target notebook tab.
+- Params: `taskId`, `id`, `title`, `kind`, `tab?`, `content`
 
 **`notebook_set_view`** — Set or merge the notebook view.
 - Params: `taskId`, `merge?`, `view` (JSON string)

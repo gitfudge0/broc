@@ -109,16 +109,14 @@ export function timeline({ events, limit = 15 }: TimelineProps): string {
 export const timelineCSS = /* css */ `
 .tl {
   display: flex;
-  flex-direction: row;
-  gap: var(--sp-2);
-  overflow-x: auto;
-  padding-bottom: var(--sp-3);
-  scroll-snap-type: x mandatory;
+  flex-direction: column;
+  gap: var(--sp-3);
+  position: relative;
 }
 
 .tl-item {
-  flex-shrink: 0;
-  width: 210px;
+  position: relative;
+  margin-left: 18px;
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
@@ -126,11 +124,36 @@ export const timelineCSS = /* css */ `
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
-  scroll-snap-align: start;
 }
 
 .tl-item:hover {
   border-color: var(--border-strong);
+}
+
+.tl-item::before {
+  content: "";
+  position: absolute;
+  left: -18px;
+  top: 16px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  border: 2px solid var(--border-strong);
+}
+
+.tl-item::after {
+  content: "";
+  position: absolute;
+  left: -14px;
+  top: 28px;
+  bottom: -20px;
+  width: 2px;
+  background: var(--border);
+}
+
+.tl-item:last-child::after {
+  display: none;
 }
 
 .tl-item__top {
@@ -195,17 +218,11 @@ export const timelineCSS = /* css */ `
 }
 
 .tl-more {
-  flex-shrink: 0;
+  margin-left: 18px;
   display: flex;
   align-items: center;
-  padding: var(--sp-4);
+  padding: var(--sp-2) 0;
   color: var(--text-muted);
   font-size: 12px;
-}
-
-@media (max-width: 900px) {
-  .tl-item {
-    width: 170px;
-  }
 }
 `;

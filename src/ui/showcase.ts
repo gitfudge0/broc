@@ -35,6 +35,16 @@ export interface ShowcaseTaskRecord {
     tags: string[];
     artifacts: ShowcaseArtifact[];
   };
+  workflow: {
+    milestones: Array<{ id: string; title: string; summary: string; createdAt: string; screenshotArtifactId?: string }>;
+    gatheredResults: Array<{ id: string; label: string; value: string; source?: string; fields?: Record<string, string> }>;
+    finalOutput: {
+      summary: string;
+      details: string;
+      gathered: Array<{ id: string; label: string; value: string; source?: string; fields?: Record<string, string> }>;
+      screenshotArtifactId?: string;
+    };
+  };
   view: {
     summary: string;
     highlights: Array<{ id: string; label: string; value: string }>;
@@ -55,7 +65,7 @@ export function createShowcaseTaskSummary(): ShowcaseTaskSummary {
     createdAt,
     updatedAt,
     tags: ["demo", "ui", "showcase"],
-    summary: "Pinned visual reference for every notebook content renderer.",
+    summary: "Pinned demo of the simplified markdown-first notebook layout.",
     pinned: true,
     deletable: false,
   };
@@ -92,152 +102,68 @@ export function createShowcaseTask(): ShowcaseTaskRecord {
         },
       ],
     },
+    workflow: {
+      milestones: [
+        {
+          id: "milestone-1",
+          title: "Showcase built",
+          summary: "Prepared the simplified notebook layout with one primary output surface.",
+          createdAt: "2026-03-17T09:20:00.000Z",
+          screenshotArtifactId: "showcase-image",
+        },
+      ],
+      gatheredResults: [
+        {
+          id: "result-1",
+          label: "Track",
+          value: "Rockstar",
+          fields: {
+            Rank: "1",
+            Song: "Rockstar",
+            Source: "Example showcase page",
+          },
+          source: "Example showcase page",
+        },
+      ],
+      finalOutput: {
+        summary: "Showcase task completed with representative notebook content.",
+        details: "This sample demonstrates the simplified notebook: a single primary output view with supporting sections below it.",
+        gathered: [
+          {
+            id: "result-1",
+            label: "Track",
+            value: "Rockstar",
+            fields: {
+              Rank: "1",
+              Song: "Rockstar",
+              Source: "Example showcase page",
+            },
+            source: "Example showcase page",
+          },
+        ],
+        screenshotArtifactId: "showcase-image",
+      },
+    },
     view: {
-      summary: "A built-in gallery of notebook renderers and surrounding UI surfaces, intended for rapid visual review.",
-      highlights: [
-        { id: "hl-1", label: "Renderer Kinds", value: "15" },
-        { id: "hl-2", label: "Artifacts", value: "Image + File" },
-        { id: "hl-3", label: "Timeline Events", value: "5 sample entries" },
-        { id: "hl-4", label: "Use Case", value: "Visual QA" },
-      ],
-      suggestedActions: [
-        {
-          id: "action-1",
-          label: "Review notebook docs",
-          kind: "open_url",
-          payload: { url: "https://developer.mozilla.org/en-US/docs/Web/HTML" },
-        },
-        {
-          id: "action-2",
-          label: "Open Broc repository",
-          kind: "open_url",
-          payload: { url: "https://github.com" },
-        },
-      ],
+      summary: "A built-in demo of the markdown-first notebook page with inline supporting sections.",
+      highlights: [],
+      suggestedActions: [],
       sections: [
         {
-          id: "section-text",
-          title: "Text",
-          kind: "text",
-          content: "A straightforward body copy block for notes, summaries, and inline narrative. It should feel calm and readable across long-form content.",
-        },
-        {
-          id: "section-markdown",
-          title: "Markdown",
+          id: "final-output",
+          title: "Final Output",
           kind: "markdown",
-          content: "# Heading\n\n## Subheading\n\nThis renderer supports **bold text**, inline `code`, and [external links](https://example.com).\n\n### Notes\n\nUse it for richer narrative sections.",
+          content: "# Notebook Showcase\n\n## Summary\n\nThe main page now renders a single markdown document.\n\n## Gathered Information\n\nThis sample keeps user-facing information in one readable place instead of multiple component renderers.\n\n## Results\n\n1. Track: Rockstar",
         },
         {
-          id: "section-key-value",
-          title: "Key Value",
-          kind: "key_value",
-          content: {
-            Environment: "Notebook Dev",
-            Browser: "Managed Chromium",
-            URL: "https://example.com/showcase",
-            Status: "Ready for review",
-          },
-        },
-        {
-          id: "section-list",
-          title: "List",
-          kind: "list",
-          content: [
-            "Visual hierarchy",
-            "Spacing rhythm",
-            "Color contrast",
-            "Empty state clarity",
-          ],
-        },
-        {
-          id: "section-checklist",
-          title: "Checklist",
+          id: "supporting-notes",
+          title: "Supporting Notes",
           kind: "checklist",
           content: [
             { label: "Header looks polished", checked: true },
-            { label: "Sidebar item is easy to find", checked: true },
-            { label: "Artifact gallery needs tweaks", checked: false },
+            { label: "Main page uses one markdown document", checked: true },
+            { label: "Supporting details render inline below the main output", checked: true },
           ],
-        },
-        {
-          id: "section-metrics",
-          title: "Metrics",
-          kind: "metrics",
-          content: [
-            { label: "Sections", value: "15" },
-            { label: "Surface Variants", value: "4" },
-            { label: "Review Speed", value: "Fast" },
-          ],
-        },
-        {
-          id: "section-links",
-          title: "Links",
-          kind: "links",
-          content: [
-            { label: "HTML reference", url: "https://developer.mozilla.org/en-US/docs/Web/HTML" },
-            { label: "CSS reference", url: "https://developer.mozilla.org/en-US/docs/Web/CSS" },
-            { label: "Accessibility basics", url: "https://www.w3.org/WAI/fundamentals/accessibility-intro/" },
-          ],
-        },
-        {
-          id: "section-table",
-          title: "Table",
-          kind: "table",
-          content: [
-            { Component: "Sidebar", Purpose: "Navigation", State: "Stable" },
-            { Component: "Section Cards", Purpose: "Content display", State: "Growing" },
-            { Component: "Timeline", Purpose: "Progress history", State: "Stable" },
-          ],
-        },
-        {
-          id: "section-code",
-          title: "Code",
-          kind: "code",
-          content: "const showcase = { pinned: true, kind: 'demo' };\nconsole.log(showcase);",
-        },
-        {
-          id: "section-json",
-          title: "JSON",
-          kind: "json",
-          content: {
-            component: "artifact_gallery",
-            supportsImages: true,
-            supportsFiles: true,
-            reviewMode: "visual",
-          },
-        },
-        {
-          id: "section-diff",
-          title: "Diff",
-          kind: "diff",
-          content: "- Old spacing scale\n+ Refined spacing scale\n- Generic label styling\n+ Sharper typography for labels",
-        },
-        {
-          id: "section-media",
-          title: "Media",
-          kind: "media",
-          content: [
-            { src: SAMPLE_IMAGE, alt: "Gradient preview card" },
-            { src: SAMPLE_IMAGE, alt: "Alternative showcase preview" },
-          ],
-        },
-        {
-          id: "section-html",
-          title: "HTML",
-          kind: "html",
-          content: '<div style="padding:16px;border-radius:16px;background:linear-gradient(135deg,#f8efe1,#d9e7ff);border:1px solid rgba(70,85,105,.18)"><strong style="display:block;margin-bottom:6px">Custom HTML callout</strong><span style="color:#475569">Useful when an agent wants a bespoke formatted payload.</span></div>',
-        },
-        {
-          id: "section-timeline",
-          title: "Timeline",
-          kind: "timeline",
-          content: "Rendered below in the dedicated timeline area.",
-        },
-        {
-          id: "section-artifacts",
-          title: "Artifact Gallery",
-          kind: "artifact_gallery",
-          content: "Rendered below in the dedicated artifacts area.",
         },
       ],
     },

@@ -9,10 +9,70 @@ export type NotebookTaskStatus =
 
 export type NotebookActor = "agent" | "system" | "user";
 
+export type NotebookPlanStepStatus = "pending" | "running" | "completed" | "blocked";
+
+export interface NotebookPlanStep {
+  id: string;
+  label: string;
+  status: NotebookPlanStepStatus;
+}
+
+export interface NotebookMilestone {
+  id: string;
+  title: string;
+  summary: string;
+  createdAt: string;
+  screenshotArtifactId?: string;
+}
+
+export interface NotebookGatheredResult {
+  id: string;
+  label: string;
+  value: string;
+  source?: string;
+  fields?: Record<string, string>;
+  createdAt: string;
+}
+
+export interface NotebookFinalOutput {
+  summary?: string;
+  details?: string;
+  gathered?: NotebookGatheredResult[];
+  screenshotArtifactId?: string;
+}
+
+export type NotebookTabId = "final-output";
+
+export interface NotebookPresentationSection {
+  id: string;
+  title: string;
+  kind: NotebookSectionKind;
+  tab?: NotebookTabId;
+  content: unknown;
+}
+
+export interface NotebookPresentationState {
+  summary?: string;
+  highlights?: NotebookHighlight[];
+  suggestedActions?: NotebookSuggestedAction[];
+  customSections?: NotebookPresentationSection[];
+}
+
+export interface NotebookTaskWorkflow {
+  task?: string;
+  plan?: NotebookPlanStep[];
+  currentStepId?: string;
+  milestones?: NotebookMilestone[];
+  gatheredResults?: NotebookGatheredResult[];
+  finalOutput?: NotebookFinalOutput;
+  presentation?: NotebookPresentationState;
+}
+
 export type NotebookSectionKind =
   | "text"
   | "markdown"
   | "key_value"
+  | "list"
   | "table"
   | "code"
   | "json"
@@ -42,6 +102,7 @@ export interface NotebookSection {
   id: string;
   title: string;
   kind: NotebookSectionKind;
+  tab?: NotebookTabId;
   content: unknown;
 }
 
@@ -103,6 +164,7 @@ export interface NotebookTaskSummary {
 export interface NotebookTaskRecord {
   meta: NotebookTaskMeta;
   view: NotebookView;
+  workflow: NotebookTaskWorkflow;
   events?: NotebookEvent[];
 }
 
@@ -122,6 +184,8 @@ export interface NotebookCreateInput {
   tags?: string[];
   sessionId?: string;
   tabId?: number;
+  task?: string;
+  plan?: NotebookPlanStep[];
 }
 
 export interface NotebookMetaUpdate {
